@@ -56,7 +56,7 @@ jobs:
           - 5001:5000
 
     env:
-      TEST_TAG: localhost:5001/actions/container-toolkit-action:latest
+      TEST_TAG: localhost:5001/dracor/validate-action:latest
 
     steps:
       - name: Checkout
