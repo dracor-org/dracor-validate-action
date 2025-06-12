@@ -1,22 +1,23 @@
 {
-  "name": "container-toolkit-template",
-  "description": "Container template action using @actions/toolkit",
+  "name": "dracor-validate-action",
+  "description": "Github action validating TEI files",
   "version": "0.0.0",
-  "author": "",
+  "author": "Carsten Milling <cmil@hashtable.de>",
   "private": true,
+  "license": "MIT",
   "type": "module",
-  "homepage": "https://github.com/actions/container-toolkit-template#readme",
+  "homepage": "https://github.com/dracor-org/dracor-validate-action#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/actions/container-toolkit-template.git"
+    "url": "git+https://github.com/dracor-org/dracor-validate-action.git"
   },
   "bugs": {
-    "url": "https://github.com/actions/container-toolkit-template/issues"
+    "url": "https://github.com/dracor-org/dracor-validate-action/issues"
   },
   "keywords": [
     "actions",
-    "container",
-    "toolkit",
+    "xml",
+    "TEI",
     "setup"
   ],
   "exports": {
@@ -37,7 +38,6 @@
     "test": "NODE_OPTIONS=--experimental-vm-modules NODE_NO_WARNINGS=1 npx jest",
     "all": "npm run format:write && npm run lint && npm run test && npm run coverage && npm run package"
   },
-  "license": "MIT",
   "dependencies": {
     "@actions/core": "^1.11.1",
     "@actions/github": "^6.0.1"
