@@ -7,7 +7,7 @@
         <title type="sub">A Tragedy</title>
         <author>William S</author>
       </titleStmt>
-      <publicationStmt>
+      <publicationStmt quux="1234">
         <publisher xml:id="dracor">DraCor</publisher>
         <idno type="URL">https://dracor.org</idno>
         <availability>
