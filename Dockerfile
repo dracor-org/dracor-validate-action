@@ -2,8 +2,7 @@
 FROM node:slim
 
 RUN apt-get update && \
-  apt-get install -y default-jdk && \
-  apt-get install -y jing
+  apt-get install -y jing=20220510-2
 
 # Create a directory for the action code
 RUN mkdir -p /usr/src/app
