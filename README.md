@@ -62,12 +62,13 @@ jobs:
 
 With docker installed this action can also be run locally to validate one or
 more TEI files. You need to mount your local TEI files to the `/tei` directory
-in the docker container. For the following examples we assume you are running
-the docker commands from the directory containing a directory `tei`.
+in the docker container and adjust the `files` input accordingly. For the
+following examples we assume you are running the docker commands from the
+directory containing a directory `tei`.
 
 ```sh
 docker pull dracor/validate-action:latest
-docker run --rm -it -v $PWD/tei:/tei dracor/validate-action
+docker run --rm -it -e INPUT_FILES='/tei/*.xml' -v $PWD/tei:/tei dracor/validate-action
 ```
 
 This validates each XML file in the `tei` directory against the latest supported
