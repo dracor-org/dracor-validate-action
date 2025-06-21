@@ -29775,7 +29775,8 @@ function getParams() {
     const schema = coreExports.getInput('schema') || 'all';
     const version = coreExports.getInput('version') || defaultVersion(schema);
     const files = coreExports.getInput('files') || 'tei/*.xml';
-    return { schema, version, files };
+    const warnOnly = /^(yes|true)$/i.test(coreExports.getInput('warn-only'));
+    return { schema, version, files, warnOnly };
 }
 
 /**
@@ -29786,10 +29787,11 @@ function getParams() {
 async function run() {
     try {
         coreExports.debug(`cwd '${process.cwd()}'`);
-        const { schema, version, files } = getParams();
+        const { schema, version, files, warnOnly } = getParams();
         coreExports.debug(`schema '${schema}'`);
         coreExports.debug(`version '${version}'`);
         coreExports.debug(`files '${files}'`);
+        coreExports.debug(`warn-only '${warnOnly ? 'yes' : 'no'}'`);
         // the schema directory is expected next to the one containing index.js
         const schemaDir = join(dirname(import.meta.dirname), 'schemas');
         coreExports.debug(`schemaDir '${schemaDir}'`);
@@ -29859,10 +29861,6 @@ async function run() {
             const uniqueFiles = errors
                 .map((e) => e.file)
                 .filter((f, i, a) => a.indexOf(f) === i);
-            coreExports.debug(`Total files validated: ${filePaths.length}`);
-            coreExports.debug(`Files with errors: ${uniqueFiles.length}`);
-            coreExports.debug(`Total number of errors: ${errors.length}`);
-            coreExports.debug(`Unique errors: ${uniqueErrors.length}`);
             coreExports.summary.addRaw(`Total files validated: ${filePaths.length}`);
             coreExports.summary.addBreak();
             coreExports.summary.addRaw(`Files with errors: ${uniqueFiles.length}`);
@@ -29876,7 +29874,14 @@ async function run() {
             coreExports.debug(`No files found. ('${files}')`);
             coreExports.summary.addRaw(`No files found. ('${files}')`);
         }
+        console.log(coreExports.summary.stringify());
+        if (process.env.GITHUB_STEP_SUMMARY) {
+            coreExports.summary.write();
+        }
         coreExports.setOutput('errors', errors.length);
+        if (!warnOnly && errors.length > 0) {
+            coreExports.setFailed('Invalid documents');
+        }
     }
     catch (error) {
         console.log(error);
