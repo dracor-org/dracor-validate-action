@@ -102,10 +102,6 @@ export async function run(): Promise<void> {
       const uniqueFiles = errors
         .map((e) => e.file)
         .filter((f, i, a) => a.indexOf(f) === i);
-      core.debug(`Total files validated: ${filePaths.length}`);
-      core.debug(`Files with errors: ${uniqueFiles.length}`);
-      core.debug(`Total number of errors: ${errors.length}`);
-      core.debug(`Unique errors: ${uniqueErrors.length}`);
       core.summary.addRaw(`Total files validated: ${filePaths.length}`);
       core.summary.addBreak();
       core.summary.addRaw(`Files with errors: ${uniqueFiles.length}`);
@@ -117,6 +113,10 @@ export async function run(): Promise<void> {
     } else {
       core.debug(`No files found. ('${files}')`);
       core.summary.addRaw(`No files found. ('${files}')`);
+    }
+    console.log(core.summary.stringify());
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      core.summary.write();
     }
     core.setOutput('errors', errors.length);
     if (!warnOnly && errors.length > 0) {
