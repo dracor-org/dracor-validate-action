@@ -88,7 +88,7 @@ export async function run(): Promise<void> {
           errors.push({ file, lineNumber, columnNumber, type, message });
           if (type === 'error') {
             core.error(message, {
-              title: 'validation error',
+              title: `validation error (${rngFileName})`,
               file,
               startLine: lineNumber,
               startColumn: columnNumber,
