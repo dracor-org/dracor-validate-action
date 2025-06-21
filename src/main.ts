@@ -21,10 +21,11 @@ export async function run(): Promise<void> {
   try {
     core.debug(`cwd '${process.cwd()}'`);
 
-    const { schema, version, files } = getParams();
+    const { schema, version, files, warnOnly } = getParams();
     core.debug(`schema '${schema}'`);
     core.debug(`version '${version}'`);
     core.debug(`files '${files}'`);
+    core.debug(`warn-only '${warnOnly ? 'yes' : 'no'}'`);
 
     // the schema directory is expected next to the one containing index.js
     const schemaDir = join(dirname(import.meta.dirname), 'schemas');
@@ -118,6 +119,9 @@ export async function run(): Promise<void> {
       core.summary.addRaw(`No files found. ('${files}')`);
     }
     core.setOutput('errors', errors.length);
+    if (!warnOnly && errors.length > 0) {
+      core.setFailed('Invalid documents');
+    }
   } catch (error) {
     console.log(error);
     // Fail the workflow run if an error occurs

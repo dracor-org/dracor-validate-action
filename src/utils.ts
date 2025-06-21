@@ -6,6 +6,7 @@ export interface Params {
   schema: string;
   version: string;
   files: string;
+  warnOnly: boolean;
 }
 
 export function trimFilePath(path: string) {
@@ -23,5 +24,6 @@ export function getParams(): Params {
   const schema = core.getInput('schema') || 'all';
   const version = core.getInput('version') || defaultVersion(schema);
   const files = core.getInput('files') || 'tei/*.xml';
-  return { schema, version, files };
+  const warnOnly = /^(yes|true)$/i.test(core.getInput('warn-only'));
+  return { schema, version, files, warnOnly };
 }
