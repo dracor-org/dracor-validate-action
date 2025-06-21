@@ -39,6 +39,7 @@ describe('main.ts', () => {
       }
       return '';
     });
+    core.summary.stringify.mockImplementation(() => '<summary>');
 
     exec.exec.mockImplementation(mockJingExecSuccess);
   });
@@ -49,14 +50,12 @@ describe('main.ts', () => {
 
   it('runs with successful jing validation', async () => {
     await run();
-    expect(core.setOutput).toHaveBeenNthCalledWith(1, 'errors', 0);
     expect(exec.exec).toHaveBeenCalledTimes(1);
   });
 
   it('runs with jing validation errors', async () => {
     exec.exec.mockImplementation(mockJingExecFailure);
     await run();
-    expect(core.setOutput).toHaveBeenNthCalledWith(1, 'errors', 2);
     expect(exec.exec).toHaveBeenCalledTimes(1);
   });
 });

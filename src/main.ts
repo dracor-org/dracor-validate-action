@@ -114,11 +114,19 @@ export async function run(): Promise<void> {
       core.debug(`No files found. ('${files}')`);
       core.summary.addRaw(`No files found. ('${files}')`);
     }
-    console.log(core.summary.stringify());
-    if (process.env.GITHUB_STEP_SUMMARY) {
-      core.summary.write();
+
+    try {
+      // if $GITHUB_STEP_SUMMARY is set we try to write otherwise we dump the
+      // summary to the console
+      if (process.env.GITHUB_STEP_SUMMARY) {
+        core.summary.write();
+      } else {
+        console.log(core.summary.stringify());
+      }
+    } catch (error) {
+      console.log(process.env);
+      console.log(error);
     }
-    core.setOutput('errors', errors.length);
     if (!warnOnly && errors.length > 0) {
       core.setFailed('Invalid documents');
     }

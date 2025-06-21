@@ -29874,11 +29874,20 @@ async function run() {
             coreExports.debug(`No files found. ('${files}')`);
             coreExports.summary.addRaw(`No files found. ('${files}')`);
         }
-        console.log(coreExports.summary.stringify());
-        if (process.env.GITHUB_STEP_SUMMARY) {
-            coreExports.summary.write();
+        try {
+            // if $GITHUB_STEP_SUMMARY is set we try to write otherwise we dump the
+            // summary to the console
+            if (process.env.GITHUB_STEP_SUMMARY) {
+                coreExports.summary.write();
+            }
+            else {
+                console.log(coreExports.summary.stringify());
+            }
         }
-        coreExports.setOutput('errors', errors.length);
+        catch (error) {
+            console.log(process.env);
+            console.log(error);
+        }
         if (!warnOnly && errors.length > 0) {
             coreExports.setFailed('Invalid documents');
         }

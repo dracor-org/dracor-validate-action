@@ -88,7 +88,7 @@ jobs:
             --rm ${{ env.TEST_TAG }}
 
   test-action:
-    name: GitHub Actions Test
+    name: GitHub Action Test
     runs-on: ubuntu-latest
 
     steps:
@@ -101,10 +101,6 @@ jobs:
         uses: ./
         with:
           warn-only: yes
-
-      - name: Print Output
-        id: output
-        run: echo "Number of errors ${{ steps.test-default.outputs.errors }}"
 
       - name: Test DraCor Schema
         id: test-dracor
