@@ -96,12 +96,37 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
 
-      - name: Test Local Action
-        id: test-action
+      - name: Test Default Inputs
+        id: test-default
         uses: ./
         with:
-          milliseconds: 2000
+          warn-only: yes
 
       - name: Print Output
         id: output
-        run: echo "${{ steps.test-action.outputs.time }}"
+        run: echo "Number of errors ${{ steps.test-action.outputs.errors }}"
+
+      - name: Test DraCor Schema
+        id: test-dracor
+        uses: ./
+        with:
+          schema: dracor
+          warn-only: yes
+
+      - name: Test Valid File
+        id: test-valid
+        uses: ./
+        with:
+          files: tei/valid.xml
+
+      - name: Test No Files
+        id: test-no-files
+        uses: ./
+        with:
+          files: tei/nosuchfile*
+
+      - name: Test Unknown Schema
+        id: test-unknown-schema
+        uses: ./
+        with:
+          schema: foo
