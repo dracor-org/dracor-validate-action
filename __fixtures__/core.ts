@@ -8,3 +8,8 @@ export const getInput = jest.fn<typeof core.getInput>();
 export const setOutput = jest.fn<typeof core.setOutput>();
 export const setFailed = jest.fn<typeof core.setFailed>();
 export const warning = jest.fn<typeof core.warning>();
+export const summary = {
+  addHeading: jest.fn<typeof core.summary.addHeading>(),
+  addRaw: jest.fn<typeof core.summary.addRaw>(),
+  addBreak: jest.fn<typeof core.summary.addBreak>(),
+};

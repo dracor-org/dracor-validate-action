@@ -2,20 +2,32 @@ name: "TEI validation"
 description: "Validate XML documents against TEI schema"
 author: "Carsten Milling <cmil@hashtable.de>"
 
-# Define your inputs here.
 inputs:
-  milliseconds:
-    description: "Your input description here"
-    required: true
-    default: "1000"
+  schema:
+    description: "Schema to validate against"
+    required: false
+    default: "all"
+  version:
+    description: "Schema version to validate against"
+    required: false
+    default: ""
+  files:
+    description: "Path or pattern to select TEI files"
+    required: false
+    default: "tei/*.xml"
+  warn-only:
+    description: "Exit gracefully when validation fails"
+    required: false
+    default: "false"
 
-# Define your outputs here.
 outputs:
-  time:
-    description: "Your output description here"
+  errors:
+    description: "Number of errors"
 
 runs:
   using: docker
   image: Dockerfile
   env:
-    INPUT_MILLISECONDS: ${{ inputs.milliseconds }}
+    INPUT_SCHEMA: ${{ inputs.schema }}
+    INPUT_VERSION: ${{ inputs.version }}
+    INPUT_FILES: ${{ inputs.files }}

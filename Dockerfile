@@ -1,6 +1,10 @@
 # Set the base image to use for subsequent instructions
 FROM node:slim
 
+RUN apt update && \
+  apt install -y default-jdk && \
+  apt install -y jing
+
 # Create a directory for the action code
 RUN mkdir -p /usr/src/app
 

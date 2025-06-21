@@ -7,33 +7,56 @@
  */
 import { jest } from '@jest/globals';
 import * as core from '../__fixtures__/core.js';
+import * as exec from '../__fixtures__/exec.js';
 
 // Mocks should be declared before the module being tested is imported.
 jest.unstable_mockModule('@actions/core', () => core);
+jest.unstable_mockModule('@actions/exec', () => exec);
 
 // The module being tested should be imported dynamically. This ensures that the
 // mocks are used in place of any actual dependencies.
 const { run } = await import('../src/main.js');
 
+const twoErrorOutput = `/invalid.xml:10:36: error: attribute "foo" not allowed
+/invalid.xml:456:78: error: element "bar" not allowed`;
+
+const mockJingExecSuccess = async () => 0;
+const mockJingExecFailure = async (command, args, options) => {
+  if (options?.listeners?.stdout) {
+    options.listeners.stdout(Buffer.from(twoErrorOutput));
+  }
+  return 1;
+};
+
 describe('main.ts', () => {
   beforeEach(() => {
     // Set the action's inputs as return values from core.getInput().
-    core.getInput.mockImplementation(() => '500');
+    core.getInput.mockImplementation((input) => {
+      if (input === 'schema') {
+        return 'dracor';
+      } else if (input === 'files') {
+        return '';
+      }
+      return '';
+    });
+
+    exec.exec.mockImplementation(mockJingExecSuccess);
   });
 
   afterEach(() => {
     jest.resetAllMocks();
   });
 
-  it('Sets the time output', async () => {
+  it('runs with successful jing validation', async () => {
     await run();
+    expect(core.setOutput).toHaveBeenNthCalledWith(1, 'errors', 0);
+    expect(exec.exec).toHaveBeenCalledTimes(1);
+  });
 
-    // Verify the time output was set.
-    expect(core.setOutput).toHaveBeenNthCalledWith(
-      1,
-      'time',
-      // Simple regex to match a time string in the format HH:MM:SS.
-      expect.stringMatching(/^\d{2}:\d{2}:\d{2}/)
-    );
+  it('runs with jing validation errors', async () => {
+    exec.exec.mockImplementation(mockJingExecFailure);
+    await run();
+    expect(core.setOutput).toHaveBeenNthCalledWith(1, 'errors', 2);
+    expect(exec.exec).toHaveBeenCalledTimes(1);
   });
 });
