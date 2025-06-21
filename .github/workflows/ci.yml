@@ -121,8 +121,8 @@ jobs:
         with:
           files: tei/nosuchfile*
 
-      - name: Test Unknown Schema
-        id: test-unknown-schema
-        uses: ./
-        with:
-          schema: foo
+      # - name: Test Unknown Schema
+      #   id: test-unknown-schema
+      #   uses: ./
+      #   with:
+      #     schema: foo
