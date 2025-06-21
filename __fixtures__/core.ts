@@ -13,4 +13,5 @@ export const summary = {
   addRaw: jest.fn<typeof core.summary.addRaw>(),
   addBreak: jest.fn<typeof core.summary.addBreak>(),
   stringify: jest.fn<typeof core.summary.stringify>(),
+  write: jest.fn<typeof core.summary.write>(),
 };
