@@ -104,7 +104,7 @@ jobs:
 
       - name: Print Output
         id: output
-        run: echo "Number of errors ${{ steps.test-action.outputs.errors }}"
+        run: echo "Number of errors ${{ steps.test-default.outputs.errors }}"
 
       - name: Test DraCor Schema
         id: test-dracor
