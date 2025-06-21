@@ -5,7 +5,7 @@
 ![CI](https://github.com/cmil/dracor-validate-action/actions/workflows/ci.yml/badge.svg)
 [![Code Coverage](./badges/coverage.svg)](./badges/coverage.svg) -->
 
-This GitHub action validates TEI files specified by the `files` input against
+This GitHub Action validates TEI files specified by the `files` input against
 various schemas.
 
 ## Inputs
@@ -80,15 +80,9 @@ files you can pass the version number and a file pattern as input arguments:
 docker run --rm -it \
   -e INPUT_SCHEMA=all \
   -e INPUT_VERSION='4.6.0' \
-  -e INPUT_FILES='tei/lessing-*.xml' \
+  -e INPUT_FILES='/tei/lessing-*.xml' \
   -v $PWD/tei:/tei \
   dracor/dracor-validate-action
-```
-
-To output a markdown report you can set the `$VERBOSE` environment variable:
-
-```sh
-docker run --rm -it -e VERBOSE=yes -v $PWD/tei:/tei dracor/validate-action
 ```
 
 ## Development
