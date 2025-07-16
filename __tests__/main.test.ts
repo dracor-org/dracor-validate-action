@@ -50,12 +50,12 @@ describe('main.ts', () => {
 
   it('runs with successful jing validation', async () => {
     await run();
-    expect(exec.exec).toHaveBeenCalledTimes(1);
+    expect(exec.exec).toHaveBeenCalledTimes(2);
   });
 
   it('runs with jing validation errors', async () => {
     exec.exec.mockImplementation(mockJingExecFailure);
     await run();
-    expect(exec.exec).toHaveBeenCalledTimes(1);
+    expect(exec.exec).toHaveBeenCalledTimes(2);
   });
 });

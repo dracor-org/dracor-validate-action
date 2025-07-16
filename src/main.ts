@@ -4,6 +4,7 @@ import glob from '@actions/glob';
 import { dirname, join } from 'path';
 import { SummaryTableRow } from '@actions/core/lib/summary.js';
 import { getParams, trimFilePath } from './utils.js';
+import { validate } from './schematron.js';
 
 interface ValidationError {
   message: string;
@@ -73,7 +74,7 @@ export async function run(): Promise<void> {
 
       try {
         await exec('jing', [rngFile, ...filePaths], options);
-        core.debug('jing run successful');
+        core.debug('jing ran successfully');
       } catch {
         core.debug('jing exited with errors');
       }
@@ -105,6 +106,35 @@ export async function run(): Promise<void> {
           }
         }
       });
+
+      if (schematronFileName) {
+        const schematronFile = join(schemaDir, schematronFileName);
+        for (const f of filePaths) {
+          const asserts = await validate(f, schematronFile);
+          asserts.forEach(
+            ({ document, role, text, lineNumber = 0, columnNumber = 0 }) => {
+              // for now we skip informational messages
+              if (role !== 'information') {
+                const file = trimFilePath(document);
+                errors.push({
+                  file,
+                  message: text,
+                  type: role,
+                  lineNumber,
+                  columnNumber,
+                });
+                errorRows.push([
+                  file,
+                  `${lineNumber}:${columnNumber}`,
+                  role,
+                  text,
+                ]);
+              }
+            }
+          );
+        }
+      }
+
       const uniqueErrors = errors
         .map((e) => e.message)
         .filter((m, i, a) => a.indexOf(m) === i);
