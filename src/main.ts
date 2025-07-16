@@ -2,6 +2,7 @@ import * as core from '@actions/core';
 import { exec, ExecOptions } from '@actions/exec';
 import glob from '@actions/glob';
 import { dirname, join } from 'path';
+import { SummaryTableRow } from '@actions/core/lib/summary.js';
 import { getParams, trimFilePath } from './utils.js';
 
 interface ValidationError {
@@ -49,7 +50,7 @@ export async function run(): Promise<void> {
     core.debug(`rngFile '${rngFile}'`);
     core.debug(`schematronFileName '${schematronFileName}'`);
 
-    core.summary.addHeading(`Validation against ${schemaTitle}`);
+    core.summary.addHeading(`Validation against ${schemaTitle}`, '2');
 
     const globber = await glob.create(files);
     const filePaths = await globber.glob();
@@ -77,6 +78,8 @@ export async function run(): Promise<void> {
         core.debug('jing exited with errors');
       }
 
+      const errorRows: SummaryTableRow[] = [];
+
       jingOutput.split('\n').forEach((line) => {
         const m = line.match(/^([^:]+):([0-9]+):([0-9]+): ([^:]+): (.+)$/);
         if (m) {
@@ -86,6 +89,12 @@ export async function run(): Promise<void> {
           const type = m[4];
           const message = m[5];
           errors.push({ file, lineNumber, columnNumber, type, message });
+          errorRows.push([
+            file,
+            `${lineNumber}:${columnNumber}`,
+            type,
+            message,
+          ]);
           if (type === 'error') {
             core.error(message, {
               title: `validation error (${rngFileName})`,
@@ -110,6 +119,15 @@ export async function run(): Promise<void> {
       core.summary.addBreak();
       core.summary.addRaw(`Unique errors: ${uniqueErrors.length}`);
       core.summary.addBreak();
+      if (errorRows.length) {
+        errorRows.unshift([
+          { data: 'File', header: true },
+          { data: 'Line', header: true },
+          { data: 'Type', header: true },
+          { data: 'Message', header: true },
+        ]);
+        core.summary.addTable(errorRows);
+      }
     } else {
       core.debug(`No files found. ('${files}')`);
       core.summary.addRaw(`No files found. ('${files}')`);

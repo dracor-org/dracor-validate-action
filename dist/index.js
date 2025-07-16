@@ -29813,7 +29813,7 @@ async function run() {
         coreExports.debug(`rngFileName '${rngFileName}'`);
         coreExports.debug(`rngFile '${rngFile}'`);
         coreExports.debug(`schematronFileName '${schematronFileName}'`);
-        coreExports.summary.addHeading(`Validation against ${schemaTitle}`);
+        coreExports.summary.addHeading(`Validation against ${schemaTitle}`, '2');
         const globber = await glob.create(files);
         const filePaths = await globber.glob();
         console.log(filePaths);
@@ -29836,6 +29836,7 @@ async function run() {
             catch {
                 coreExports.debug('jing exited with errors');
             }
+            const errorRows = [];
             jingOutput.split('\n').forEach((line) => {
                 const m = line.match(/^([^:]+):([0-9]+):([0-9]+): ([^:]+): (.+)$/);
                 if (m) {
@@ -29845,9 +29846,15 @@ async function run() {
                     const type = m[4];
                     const message = m[5];
                     errors.push({ file, lineNumber, columnNumber, type, message });
+                    errorRows.push([
+                        file,
+                        `${lineNumber}:${columnNumber}`,
+                        type,
+                        message,
+                    ]);
                     if (type === 'error') {
                         coreExports.error(message, {
-                            title: 'validation error',
+                            title: `validation error (${rngFileName})`,
                             file,
                             startLine: lineNumber,
                             startColumn: columnNumber,
@@ -29869,6 +29876,15 @@ async function run() {
             coreExports.summary.addBreak();
             coreExports.summary.addRaw(`Unique errors: ${uniqueErrors.length}`);
             coreExports.summary.addBreak();
+            if (errorRows.length) {
+                errorRows.unshift([
+                    { data: 'File', header: true },
+                    { data: 'Line', header: true },
+                    { data: 'Type', header: true },
+                    { data: 'Message', header: true },
+                ]);
+                coreExports.summary.addTable(errorRows);
+            }
         }
         else {
             coreExports.debug(`No files found. ('${files}')`);
