@@ -37471,8 +37471,9 @@ async function run() {
             });
             if (schematronFileName) {
                 const schematronFile = join(schemaDir, schematronFileName);
+                const jar = '/usr/src/app/schxslt-cli.jar';
                 for (const f of filePaths) {
-                    const asserts = await validate(f, schematronFile);
+                    const asserts = await validate(f, schematronFile, jar);
                     asserts.forEach(({ document, role, text, lineNumber = 0, columnNumber = 0 }) => {
                         // for now we skip informational messages
                         if (role !== 'information') {
