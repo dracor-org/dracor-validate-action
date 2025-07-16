@@ -20,7 +20,7 @@ The schema to validate. Supported values are:
 ### `version`
 
 The schema version to validate against. The defaults are `"4.9.0"` for TEI-All
-and `"1.0.0-rc.1"` for the DraCor schema.
+and `"1.0.0"` for the DraCor schema.
 
 ### `files`
 
