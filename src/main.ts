@@ -69,9 +69,6 @@ export async function run(): Promise<void> {
     };
 
     if (filePaths.length) {
-      core.summary.addRaw(`Files found: ${filePaths.length}`);
-      core.summary.addBreak();
-
       try {
         await exec('jing', [rngFile, ...filePaths], options);
         core.debug('jing ran successfully');
@@ -93,7 +90,7 @@ export async function run(): Promise<void> {
           errorRows.push([
             file,
             `${lineNumber}:${columnNumber}`,
-            type,
+            type === 'error' ? '❌' : '⚠️',
             message,
           ]);
           if (type === 'error') {
@@ -127,7 +124,7 @@ export async function run(): Promise<void> {
                 errorRows.push([
                   file,
                   `${lineNumber}:${columnNumber}`,
-                  role,
+                  role === 'warning' ? '⚠️' : '❌',
                   text,
                 ]);
               }
@@ -142,18 +139,16 @@ export async function run(): Promise<void> {
       const uniqueFiles = errors
         .map((e) => e.file)
         .filter((f, i, a) => a.indexOf(f) === i);
-      core.summary.addRaw(`Total files validated: ${filePaths.length}`);
-      core.summary.addBreak();
-      core.summary.addRaw(`Files with errors: ${uniqueFiles.length}`);
-      core.summary.addBreak();
-      core.summary.addRaw(`Total number of errors: ${errors.length}`);
-      core.summary.addBreak();
-      core.summary.addRaw(`Unique errors: ${uniqueErrors.length}`);
-      core.summary.addBreak();
+      core.summary.addList([
+        `Total files validated: ${filePaths.length}`,
+        `Files with errors: ${uniqueFiles.length}`,
+        `Total number of errors: ${errors.length}`,
+        `Unique errors: ${uniqueErrors.length}`,
+      ]);
       if (errorRows.length) {
         errorRows.unshift([
           { data: 'File', header: true },
-          { data: 'Line', header: true },
+          { data: 'Line:Col', header: true },
           { data: 'Type', header: true },
           { data: 'Message', header: true },
         ]);

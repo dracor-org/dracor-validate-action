@@ -37434,8 +37434,6 @@ async function run() {
             },
         };
         if (filePaths.length) {
-            coreExports.summary.addRaw(`Files found: ${filePaths.length}`);
-            coreExports.summary.addBreak();
             try {
                 await execExports.exec('jing', [rngFile, ...filePaths], options);
                 coreExports.debug('jing ran successfully');
@@ -37456,7 +37454,7 @@ async function run() {
                     errorRows.push([
                         file,
                         `${lineNumber}:${columnNumber}`,
-                        type,
+                        type === 'error' ? '❌' : '⚠️',
                         message,
                     ]);
                     if (type === 'error') {
@@ -37488,7 +37486,7 @@ async function run() {
                             errorRows.push([
                                 file,
                                 `${lineNumber}:${columnNumber}`,
-                                role,
+                                role === 'warning' ? '⚠️' : '❌',
                                 text,
                             ]);
                         }
@@ -37501,18 +37499,16 @@ async function run() {
             const uniqueFiles = errors
                 .map((e) => e.file)
                 .filter((f, i, a) => a.indexOf(f) === i);
-            coreExports.summary.addRaw(`Total files validated: ${filePaths.length}`);
-            coreExports.summary.addBreak();
-            coreExports.summary.addRaw(`Files with errors: ${uniqueFiles.length}`);
-            coreExports.summary.addBreak();
-            coreExports.summary.addRaw(`Total number of errors: ${errors.length}`);
-            coreExports.summary.addBreak();
-            coreExports.summary.addRaw(`Unique errors: ${uniqueErrors.length}`);
-            coreExports.summary.addBreak();
+            coreExports.summary.addList([
+                `Total files validated: ${filePaths.length}`,
+                `Files with errors: ${uniqueFiles.length}`,
+                `Total number of errors: ${errors.length}`,
+                `Unique errors: ${uniqueErrors.length}`,
+            ]);
             if (errorRows.length) {
                 errorRows.unshift([
                     { data: 'File', header: true },
-                    { data: 'Line', header: true },
+                    { data: 'Line:Col', header: true },
                     { data: 'Type', header: true },
                     { data: 'Message', header: true },
                 ]);
