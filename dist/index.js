@@ -37394,6 +37394,8 @@ function parseSVRL(file) {
 async function run() {
     try {
         coreExports.debug(`cwd '${process.cwd()}'`);
+        let numErrors = 0;
+        let numWarnings = 0;
         const { schema, version, files, warnOnly } = getParams();
         coreExports.debug(`schema '${schema}'`);
         coreExports.debug(`version '${version}'`);
@@ -37425,7 +37427,7 @@ async function run() {
         const filePaths = await globber.glob();
         console.log(filePaths);
         let jingOutput = '';
-        const errors = [];
+        const issues = [];
         const options = {
             listeners: {
                 stdout: (data) => {
@@ -37450,7 +37452,7 @@ async function run() {
                     const columnNumber = parseInt(m[3]);
                     const type = m[4];
                     const message = m[5];
-                    errors.push({ file, lineNumber, columnNumber, type, message });
+                    issues.push({ file, lineNumber, columnNumber, type, message });
                     errorRows.push([
                         file,
                         `${lineNumber}:${columnNumber}`,
@@ -37476,10 +37478,10 @@ async function run() {
                         // for now we skip informational messages
                         if (role !== 'information') {
                             const file = trimFilePath(document);
-                            errors.push({
+                            issues.push({
                                 file,
                                 message: text,
-                                type: role,
+                                type: role || 'error',
                                 lineNumber,
                                 columnNumber,
                             });
@@ -37493,17 +37495,21 @@ async function run() {
                     });
                 }
             }
-            const uniqueErrors = errors
+            const uniqueIssues = issues
                 .map((e) => e.message)
                 .filter((m, i, a) => a.indexOf(m) === i);
-            const uniqueFiles = errors
+            const uniqueFiles = issues
                 .map((e) => e.file)
                 .filter((f, i, a) => a.indexOf(f) === i);
+            numErrors = issues.filter((e) => e.type === 'error').length;
+            numWarnings = issues.filter((e) => e.type === 'warning').length;
             coreExports.summary.addList([
                 `Total files validated: ${filePaths.length}`,
-                `Files with errors: ${uniqueFiles.length}`,
-                `Total number of errors: ${errors.length}`,
-                `Unique errors: ${uniqueErrors.length}`,
+                `Files with issues: ${uniqueFiles.length}`,
+                `Total number of issues: ${issues.length}`,
+                `Unique issues: ${uniqueIssues.length}`,
+                `Errors: ${numErrors}`,
+                `Warnings: ${numWarnings}`,
             ]);
             if (errorRows.length) {
                 errorRows.unshift([
@@ -37533,7 +37539,7 @@ async function run() {
             console.log(process.env);
             console.log(error);
         }
-        if (!warnOnly && errors.length > 0) {
+        if (!warnOnly && numErrors > 0) {
             coreExports.setFailed('Invalid documents');
         }
     }

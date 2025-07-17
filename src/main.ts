@@ -23,6 +23,9 @@ export async function run(): Promise<void> {
   try {
     core.debug(`cwd '${process.cwd()}'`);
 
+    let numErrors = 0;
+    let numWarnings = 0;
+
     const { schema, version, files, warnOnly } = getParams();
     core.debug(`schema '${schema}'`);
     core.debug(`version '${version}'`);
@@ -58,7 +61,7 @@ export async function run(): Promise<void> {
     console.log(filePaths);
 
     let jingOutput = '';
-    const errors: ValidationError[] = [];
+    const issues: ValidationError[] = [];
 
     const options: ExecOptions = {
       listeners: {
@@ -86,7 +89,7 @@ export async function run(): Promise<void> {
           const columnNumber = parseInt(m[3]);
           const type = m[4];
           const message = m[5];
-          errors.push({ file, lineNumber, columnNumber, type, message });
+          issues.push({ file, lineNumber, columnNumber, type, message });
           errorRows.push([
             file,
             `${lineNumber}:${columnNumber}`,
@@ -114,10 +117,10 @@ export async function run(): Promise<void> {
               // for now we skip informational messages
               if (role !== 'information') {
                 const file = trimFilePath(document);
-                errors.push({
+                issues.push({
                   file,
                   message: text,
-                  type: role,
+                  type: role || 'error',
                   lineNumber,
                   columnNumber,
                 });
@@ -133,17 +136,21 @@ export async function run(): Promise<void> {
         }
       }
 
-      const uniqueErrors = errors
+      const uniqueIssues = issues
         .map((e) => e.message)
         .filter((m, i, a) => a.indexOf(m) === i);
-      const uniqueFiles = errors
+      const uniqueFiles = issues
         .map((e) => e.file)
         .filter((f, i, a) => a.indexOf(f) === i);
+      numErrors = issues.filter((e) => e.type === 'error').length;
+      numWarnings = issues.filter((e) => e.type === 'warning').length;
       core.summary.addList([
         `Total files validated: ${filePaths.length}`,
-        `Files with errors: ${uniqueFiles.length}`,
-        `Total number of errors: ${errors.length}`,
-        `Unique errors: ${uniqueErrors.length}`,
+        `Files with issues: ${uniqueFiles.length}`,
+        `Total number of issues: ${issues.length}`,
+        `Unique issues: ${uniqueIssues.length}`,
+        `Errors: ${numErrors}`,
+        `Warnings: ${numWarnings}`,
       ]);
       if (errorRows.length) {
         errorRows.unshift([
@@ -171,7 +178,7 @@ export async function run(): Promise<void> {
       console.log(process.env);
       console.log(error);
     }
-    if (!warnOnly && errors.length > 0) {
+    if (!warnOnly && numErrors > 0) {
       core.setFailed('Invalid documents');
     }
   } catch (error) {
