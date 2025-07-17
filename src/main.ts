@@ -182,7 +182,6 @@ export async function run(): Promise<void> {
         console.log(core.summary.stringify());
       }
     } catch (error) {
-      console.log(process.env);
       console.log(error);
     }
     if (!warnOnly && numErrors > 0) {

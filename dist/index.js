@@ -37552,7 +37552,6 @@ async function run() {
             }
         }
         catch (error) {
-            console.log(process.env);
             console.log(error);
         }
         if (!warnOnly && numErrors > 0) {
