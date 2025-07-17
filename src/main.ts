@@ -3,7 +3,12 @@ import { exec, ExecOptions } from '@actions/exec';
 import glob from '@actions/glob';
 import { dirname, join } from 'path';
 import { SummaryTableRow } from '@actions/core/lib/summary.js';
-import { getParams, makeLink, trimFilePath } from './utils.js';
+import {
+  getParams,
+  makeLink,
+  trimFilePath,
+  truncateJingMessage,
+} from './utils.js';
 import { validate } from './schematron.js';
 
 interface ValidationError {
@@ -99,7 +104,7 @@ export async function run(): Promise<void> {
             makeLink(file, lineNumber),
             `${lineNumber}:${columnNumber}`,
             type === 'error' ? '❌' : '⚠️',
-            message,
+            truncateJingMessage(message),
           ]);
         }
       });
@@ -125,7 +130,7 @@ export async function run(): Promise<void> {
                   makeLink(file, lineNumber),
                   `${lineNumber}:${columnNumber}`,
                   role === 'warning' ? '⚠️' : '❌',
-                  text,
+                  `<small>${text}</small>`,
                 ]);
               }
             }

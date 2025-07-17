@@ -29795,6 +29795,9 @@ function makeLink(filePath, line, text) {
     }
     return linkText;
 }
+function truncateJingMessage(message) {
+    return message.split('; ')[0];
+}
 
 var domParser = {};
 
@@ -37478,7 +37481,7 @@ async function run() {
                         makeLink(file, lineNumber),
                         `${lineNumber}:${columnNumber}`,
                         type === 'error' ? '❌' : '⚠️',
-                        message,
+                        truncateJingMessage(message),
                     ]);
                 }
             });
@@ -37502,7 +37505,7 @@ async function run() {
                                 makeLink(file, lineNumber),
                                 `${lineNumber}:${columnNumber}`,
                                 role === 'warning' ? '⚠️' : '❌',
-                                text,
+                                `<small>${text}</small>`,
                             ]);
                         }
                     });

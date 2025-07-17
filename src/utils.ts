@@ -50,3 +50,7 @@ export function makeLink(
   }
   return linkText;
 }
+
+export function truncateJingMessage(message: string): string {
+  return message.split('; ')[0];
+}
