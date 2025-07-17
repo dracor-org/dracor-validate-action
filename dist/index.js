@@ -29778,6 +29778,23 @@ function getParams() {
     const warnOnly = /^(yes|true)$/i.test(coreExports.getInput('warn-only'));
     return { schema, version, files, warnOnly };
 }
+function makeUrl(filePath, line) {
+    if (process.env.GITHUB_REPOSITORY) {
+        const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+        const sha = process.env.GITHUB_SHA;
+        const url = `https://github.com/${owner}/${repo}/blob/${sha}/${filePath}#L${line}`;
+        return url;
+    }
+    return '';
+}
+function makeLink(filePath, line, text) {
+    const linkText = text || filePath;
+    const url = makeUrl(filePath, line);
+    if (url) {
+        return `<a href="${url}">${linkText}</a>`;
+    }
+    return linkText;
+}
 
 var domParser = {};
 
@@ -37396,6 +37413,10 @@ async function run() {
         coreExports.debug(`cwd '${process.cwd()}'`);
         let numErrors = 0;
         let numWarnings = 0;
+        const sha = process.env.GITHUB_SHA;
+        if (sha) {
+            coreExports.debug(`commit '${sha}'`);
+        }
         const { schema, version, files, warnOnly } = getParams();
         coreExports.debug(`schema '${schema}'`);
         coreExports.debug(`version '${version}'`);
@@ -37454,19 +37475,11 @@ async function run() {
                     const message = m[5];
                     issues.push({ file, lineNumber, columnNumber, type, message });
                     errorRows.push([
-                        file,
+                        makeLink(file, lineNumber),
                         `${lineNumber}:${columnNumber}`,
                         type === 'error' ? '❌' : '⚠️',
                         message,
                     ]);
-                    if (type === 'error') {
-                        coreExports.error(message, {
-                            title: `validation error (${rngFileName})`,
-                            file,
-                            startLine: lineNumber,
-                            startColumn: columnNumber,
-                        });
-                    }
                 }
             });
             if (schematronFileName) {
@@ -37486,7 +37499,7 @@ async function run() {
                                 columnNumber,
                             });
                             errorRows.push([
-                                file,
+                                makeLink(file, lineNumber),
                                 `${lineNumber}:${columnNumber}`,
                                 role === 'warning' ? '⚠️' : '❌',
                                 text,

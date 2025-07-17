@@ -3,7 +3,7 @@ import { exec, ExecOptions } from '@actions/exec';
 import glob from '@actions/glob';
 import { dirname, join } from 'path';
 import { SummaryTableRow } from '@actions/core/lib/summary.js';
-import { getParams, trimFilePath } from './utils.js';
+import { getParams, makeLink, trimFilePath } from './utils.js';
 import { validate } from './schematron.js';
 
 interface ValidationError {
@@ -25,6 +25,11 @@ export async function run(): Promise<void> {
 
     let numErrors = 0;
     let numWarnings = 0;
+
+    const sha = process.env.GITHUB_SHA;
+    if (sha) {
+      core.debug(`commit '${sha}'`);
+    }
 
     const { schema, version, files, warnOnly } = getParams();
     core.debug(`schema '${schema}'`);
@@ -91,19 +96,11 @@ export async function run(): Promise<void> {
           const message = m[5];
           issues.push({ file, lineNumber, columnNumber, type, message });
           errorRows.push([
-            file,
+            makeLink(file, lineNumber),
             `${lineNumber}:${columnNumber}`,
             type === 'error' ? '❌' : '⚠️',
             message,
           ]);
-          if (type === 'error') {
-            core.error(message, {
-              title: `validation error (${rngFileName})`,
-              file,
-              startLine: lineNumber,
-              startColumn: columnNumber,
-            });
-          }
         }
       });
 
@@ -125,7 +122,7 @@ export async function run(): Promise<void> {
                   columnNumber,
                 });
                 errorRows.push([
-                  file,
+                  makeLink(file, lineNumber),
                   `${lineNumber}:${columnNumber}`,
                   role === 'warning' ? '⚠️' : '❌',
                   text,

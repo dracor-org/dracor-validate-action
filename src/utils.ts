@@ -27,3 +27,26 @@ export function getParams(): Params {
   const warnOnly = /^(yes|true)$/i.test(core.getInput('warn-only'));
   return { schema, version, files, warnOnly };
 }
+
+export function makeUrl(filePath: string, line: number): string {
+  if (process.env.GITHUB_REPOSITORY) {
+    const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+    const sha = process.env.GITHUB_SHA;
+    const url = `https://github.com/${owner}/${repo}/blob/${sha}/${filePath}#L${line}`;
+    return url;
+  }
+  return '';
+}
+
+export function makeLink(
+  filePath: string,
+  line: number,
+  text?: string
+): string {
+  const linkText = text || filePath;
+  const url = makeUrl(filePath, line);
+  if (url) {
+    return `<a href="${url}">${linkText}</a>`;
+  }
+  return linkText;
+}
