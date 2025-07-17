@@ -2,7 +2,9 @@ import * as core from '@actions/core';
 import { exec, ExecOptions } from '@actions/exec';
 import glob from '@actions/glob';
 import { dirname, join } from 'path';
+import { SummaryTableRow } from '@actions/core/lib/summary.js';
 import { getParams, trimFilePath } from './utils.js';
+import { validate } from './schematron.js';
 
 interface ValidationError {
   message: string;
@@ -49,7 +51,7 @@ export async function run(): Promise<void> {
     core.debug(`rngFile '${rngFile}'`);
     core.debug(`schematronFileName '${schematronFileName}'`);
 
-    core.summary.addHeading(`Validation against ${schemaTitle}`);
+    core.summary.addHeading(`Validation against ${schemaTitle}`, '2');
 
     const globber = await glob.create(files);
     const filePaths = await globber.glob();
@@ -67,15 +69,14 @@ export async function run(): Promise<void> {
     };
 
     if (filePaths.length) {
-      core.summary.addRaw(`Files found: ${filePaths.length}`);
-      core.summary.addBreak();
-
       try {
         await exec('jing', [rngFile, ...filePaths], options);
-        core.debug('jing run successful');
+        core.debug('jing ran successfully');
       } catch {
         core.debug('jing exited with errors');
       }
+
+      const errorRows: SummaryTableRow[] = [];
 
       jingOutput.split('\n').forEach((line) => {
         const m = line.match(/^([^:]+):([0-9]+):([0-9]+): ([^:]+): (.+)$/);
@@ -86,6 +87,12 @@ export async function run(): Promise<void> {
           const type = m[4];
           const message = m[5];
           errors.push({ file, lineNumber, columnNumber, type, message });
+          errorRows.push([
+            file,
+            `${lineNumber}:${columnNumber}`,
+            type === 'error' ? '❌' : '⚠️',
+            message,
+          ]);
           if (type === 'error') {
             core.error(message, {
               title: `validation error (${rngFileName})`,
@@ -96,20 +103,57 @@ export async function run(): Promise<void> {
           }
         }
       });
+
+      if (schematronFileName) {
+        const schematronFile = join(schemaDir, schematronFileName);
+        const jar = '/usr/src/app/schxslt-cli.jar';
+        for (const f of filePaths) {
+          const asserts = await validate(f, schematronFile, jar);
+          asserts.forEach(
+            ({ document, role, text, lineNumber = 0, columnNumber = 0 }) => {
+              // for now we skip informational messages
+              if (role !== 'information') {
+                const file = trimFilePath(document);
+                errors.push({
+                  file,
+                  message: text,
+                  type: role,
+                  lineNumber,
+                  columnNumber,
+                });
+                errorRows.push([
+                  file,
+                  `${lineNumber}:${columnNumber}`,
+                  role === 'warning' ? '⚠️' : '❌',
+                  text,
+                ]);
+              }
+            }
+          );
+        }
+      }
+
       const uniqueErrors = errors
         .map((e) => e.message)
         .filter((m, i, a) => a.indexOf(m) === i);
       const uniqueFiles = errors
         .map((e) => e.file)
         .filter((f, i, a) => a.indexOf(f) === i);
-      core.summary.addRaw(`Total files validated: ${filePaths.length}`);
-      core.summary.addBreak();
-      core.summary.addRaw(`Files with errors: ${uniqueFiles.length}`);
-      core.summary.addBreak();
-      core.summary.addRaw(`Total number of errors: ${errors.length}`);
-      core.summary.addBreak();
-      core.summary.addRaw(`Unique errors: ${uniqueErrors.length}`);
-      core.summary.addBreak();
+      core.summary.addList([
+        `Total files validated: ${filePaths.length}`,
+        `Files with errors: ${uniqueFiles.length}`,
+        `Total number of errors: ${errors.length}`,
+        `Unique errors: ${uniqueErrors.length}`,
+      ]);
+      if (errorRows.length) {
+        errorRows.unshift([
+          { data: 'File', header: true },
+          { data: 'Line:Col', header: true },
+          { data: 'Type', header: true },
+          { data: 'Message', header: true },
+        ]);
+        core.summary.addTable(errorRows);
+      }
     } else {
       core.debug(`No files found. ('${files}')`);
       core.summary.addRaw(`No files found. ('${files}')`);
