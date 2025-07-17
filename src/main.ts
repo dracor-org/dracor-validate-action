@@ -141,14 +141,19 @@ export async function run(): Promise<void> {
         .filter((f, i, a) => a.indexOf(f) === i);
       numErrors = issues.filter((e) => e.type === 'error').length;
       numWarnings = issues.filter((e) => e.type === 'warning').length;
-      core.summary.addList([
+      const stats = [
         `Total files validated: ${filePaths.length}`,
         `Files with issues: ${uniqueFiles.length}`,
-        `Total number of issues: ${issues.length}`,
-        `Unique issues: ${uniqueIssues.length}`,
-        `Errors: ${numErrors}`,
-        `Warnings: ${numWarnings}`,
-      ]);
+      ];
+      if (issues.length > 0) {
+        stats.push(
+          `Total number of issues: ${issues.length}`,
+          `Unique issues: ${uniqueIssues.length}`,
+          `Errors: ${numErrors}`,
+          `Warnings: ${numWarnings}`
+        );
+      }
+      core.summary.addList(stats);
       if (errorRows.length) {
         errorRows.unshift([
           { data: 'File', header: true },
