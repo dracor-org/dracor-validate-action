@@ -26,12 +26,12 @@ and `"1.0.0"` for the DraCor schema.
 
 Path or pattern pointing to TEI files to validate. Default `"tei/*.xml"`
 
-### `fatal`
+### `warn-only`
 
-Exit with an error code when validation fails. Default `"yes"`.
+Exit with an error code when validation fails. Default `"no"`.
 
 If you want to prevent the action from failing even if there are invalid files
-set this to `"no"`. This can be useful if you want to run the validation for
+set this to `"yes"`. This can be useful if you want to run the validation for
 informational purposes only without possibly blocking pull requests from being
 merged.
 
@@ -51,7 +51,7 @@ jobs:
         uses: dracor-org/dracor-validate-action@v1.0.0
         with:
           version: '4.6.0'
-          fatal: 'no'
+          warn-only: 'yes'
       - name: Validate against current DraCor schema
         uses: dracor-org/dracor-validate-action@v1.0.0
         with:
