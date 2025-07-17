@@ -5,8 +5,11 @@
 ![CI](https://github.com/cmil/dracor-validate-action/actions/workflows/ci.yml/badge.svg)
 [![Code Coverage](./badges/coverage.svg)](./badges/coverage.svg) -->
 
-This GitHub Action validates TEI files specified by the `files` input against
-various schemas.
+This GitHub Action validates XML files against different schemas and presents
+the validation output in the action summary. Currently
+[TEI-All](https://github.com/TEIC/TEI) and the
+[DraCor Schema](https://github.com/dracor-org/dracor-schema) are supported. For
+the DraCor Schema both the Relax NG and the Schematron rules are checked.
 
 ## Inputs
 
@@ -28,12 +31,10 @@ Path or pattern pointing to TEI files to validate. Default `"tei/*.xml"`
 
 ### `warn-only`
 
-Exit with an error code when validation fails. Default `"no"`.
-
 If you want to prevent the action from failing even if there are invalid files
 set this to `"yes"`. This can be useful if you want to run the validation for
 informational purposes only without possibly blocking pull requests from being
-merged.
+merged. Default `"no"`.
 
 ## Example usage
 
