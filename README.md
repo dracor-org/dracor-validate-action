@@ -14,7 +14,7 @@ various schemas.
 
 The schema to validate. Supported values are:
 
-- `"all"`: The TEI-All schema (default)
+- `"tei"`: The TEI-All schema (default)
 - `"dracor"`: The [DraCor schema](https://github.com/dracor-org/dracor-schema)
 
 ### `version`
@@ -79,7 +79,7 @@ files you can pass the version number and a file pattern as input arguments:
 
 ```sh
 docker run --rm -it \
-  -e INPUT_SCHEMA=all \
+  -e INPUT_SCHEMA=tei \
   -e INPUT_VERSION='4.6.0' \
   -e INPUT_FILES='/tei/lessing-*.xml' \
   -v $PWD/tei:/tei \

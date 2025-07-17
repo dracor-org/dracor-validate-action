@@ -6,7 +6,7 @@ inputs:
   schema:
     description: "Schema to validate against"
     required: false
-    default: "all"
+    default: "tei"
   version:
     description: "Schema version to validate against"
     required: false

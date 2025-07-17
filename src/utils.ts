@@ -21,7 +21,7 @@ export function defaultVersion(schema: string): string {
 }
 
 export function getParams(): Params {
-  const schema = core.getInput('schema') || 'all';
+  const schema = core.getInput('schema') || 'tei';
   const version = core.getInput('version') || defaultVersion(schema);
   const files = core.getInput('files') || 'tei/*.xml';
   const warnOnly = /^(yes|true)$/i.test(core.getInput('warn-only'));

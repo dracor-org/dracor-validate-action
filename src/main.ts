@@ -37,7 +37,7 @@ export async function run(): Promise<void> {
     core.debug(`schemaDir '${schemaDir}'`);
 
     let schemaTitle, rngFileName, schematronFileName;
-    if (schema === 'all') {
+    if (schema === 'tei') {
       schemaTitle = `TEI-All ${version}`;
       rngFileName = `tei_all_${version}.rng`;
     } else if (schema === 'dracor') {

@@ -29772,7 +29772,7 @@ function defaultVersion(schema) {
     return TEI_VERSION;
 }
 function getParams() {
-    const schema = coreExports.getInput('schema') || 'all';
+    const schema = coreExports.getInput('schema') || 'tei';
     const version = coreExports.getInput('version') || defaultVersion(schema);
     const files = coreExports.getInput('files') || 'tei/*.xml';
     const warnOnly = /^(yes|true)$/i.test(coreExports.getInput('warn-only'));
@@ -37405,7 +37405,7 @@ async function run() {
         const schemaDir = join(dirname(import.meta.dirname), 'schemas');
         coreExports.debug(`schemaDir '${schemaDir}'`);
         let schemaTitle, rngFileName, schematronFileName;
-        if (schema === 'all') {
+        if (schema === 'tei') {
             schemaTitle = `TEI-All ${version}`;
             rngFileName = `tei_all_${version}.rng`;
         }
