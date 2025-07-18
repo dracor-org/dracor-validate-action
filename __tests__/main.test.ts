@@ -32,12 +32,7 @@ describe('main.ts', () => {
   beforeEach(() => {
     // Set the action's inputs as return values from core.getInput().
     core.getInput.mockImplementation((input) => {
-      if (input === 'schema') {
-        return 'dracor';
-      } else if (input === 'files') {
-        return '';
-      }
-      return '';
+      return { schema: 'dracor', files: 'tei/valid.xml' }[input] || '';
     });
     core.summary.stringify.mockImplementation(() => '<summary>');
 

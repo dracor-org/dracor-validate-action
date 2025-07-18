@@ -100,12 +100,14 @@ jobs:
         id: test-default
         uses: ./
         with:
+          files: tei/*.xml
           warn-only: yes
 
       - name: Test DraCor Schema
         id: test-dracor
         uses: ./
         with:
+          files: tei/*.xml
           schema: dracor
           warn-only: yes
 

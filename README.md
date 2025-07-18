@@ -13,6 +13,13 @@ the DraCor Schema both the Relax NG and the Schematron rules are checked.
 
 ## Inputs
 
+### `files`
+
+The files to validate. This can be a space separated list of file paths (e.g.
+`"tei/hamlet.xml tei/othello.xml"`) or a glob pattern (e.g. `"tei/*.xml"`). This
+input is required, but it can be an empty string, allowing for validating only
+modified files in pull requests or push events (see example below).
+
 ### `schema`
 
 The schema to validate. Supported values are:
@@ -25,10 +32,6 @@ The schema to validate. Supported values are:
 The schema version to validate against. The defaults are `"4.9.0"` for TEI-All
 and `"1.0.0"` for the DraCor schema.
 
-### `files`
-
-Path or pattern pointing to TEI files to validate. Default `"tei/*.xml"`
-
 ### `warn-only`
 
 If you want to prevent the action from failing even if there are invalid files
@@ -36,7 +39,12 @@ set this to `"yes"`. This can be useful if you want to run the validation for
 informational purposes only without possibly blocking pull requests from being
 merged. Default `"no"`.
 
-## Example usage
+## Examples
+
+### Basic usage
+
+In the following examples all XML files in the `tei` directory are always
+validated, no matter on which event the action is run.
 
 ```yaml
 jobs:
@@ -46,16 +54,83 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Validate against current TEI-All schema
         uses: dracor-org/dracor-validate-action@v1.0.0
+        with:
+          files: tei/*.xml
+
       - name: Validate against older TEI-All schema
         uses: dracor-org/dracor-validate-action@v1.0.0
         with:
+          files: tei/*.xml
           version: '4.6.0'
           warn-only: 'yes'
+
       - name: Validate against current DraCor schema
         uses: dracor-org/dracor-validate-action@v1.0.0
         with:
+          files: tei/*.xml
+          schema: dracor
+```
+
+### Advanced usage
+
+The following workflow, again, validates all XML files in the `tei` directory
+when it is triggered manually (on `workflow_dispatch`). However, for pull
+requests or push events it only runs when any of these XML files has changed.
+
+```yaml
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tei/*.xml'
+  push:
+    branches: [main]
+    paths:
+      - 'tei/*.xml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate_tei:
+    runs-on: ubuntu-latest
+    name: Validate TEI files
+    steps:
+      # We need to checkout with fetch-depth 0 or 2 for push events;
+      # see https://github.com/tj-actions/changed-files?tab=readme-ov-file#usage-
+      - uses: actions/checkout@v4.2.2
+        if: ${{ github.event_name == 'push' }}
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4.2.2
+        if: ${{ github.event_name != 'push' }}
+
+      # Get changed files for push/PR only
+      - name: Get changed files
+        id: changed-tei-files
+        uses: tj-actions/changed-files@v46.05
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        with:
+          files: |
+            tei/*.xml
+
+      # Get all TEI files for workflow_dispatch
+      - name: Get changed files
+        id: all-tei-files
+        if: github.event_name == 'workflow_dispatch'
+        run: echo 'files="tei/*.xml"' >> $GITHUB_OUTPUT
+
+      # Validate
+      - name: Validate against current DraCor schema
+        uses: dracor-org/dracor-validate-action@v1.0.0
+        with:
+          files: |
+            ${{ steps.changed-tei-files.outputs.all_changed_files }}
+            ${{ steps.all-tei-files.outputs.files }}
           schema: dracor
 ```
 
@@ -80,9 +155,9 @@ files you can pass the version number and a file pattern as input arguments:
 
 ```sh
 docker run --rm -it \
+  -e INPUT_FILES='/tei/lessing-*.xml' \
   -e INPUT_SCHEMA=tei \
   -e INPUT_VERSION='4.6.0' \
-  -e INPUT_FILES='/tei/lessing-*.xml' \
   -v $PWD/tei:/tei \
   dracor/dracor-validate-action
 ```
