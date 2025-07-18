@@ -122,7 +122,7 @@ jobs:
       - name: Get changed files
         id: all-tei-files
         if: github.event_name == 'workflow_dispatch'
-        run: echo 'files="tei/*.xml"' >> $GITHUB_OUTPUT
+        run: echo 'files=tei/*.xml' >> $GITHUB_OUTPUT
 
       # Validate
       - name: Validate against current DraCor schema
