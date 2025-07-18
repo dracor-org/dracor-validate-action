@@ -56,19 +56,19 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate against current TEI-All schema
-        uses: dracor-org/dracor-validate-action@v1.0.0
+        uses: dracor-org/dracor-validate-action@v2.0.0
         with:
           files: tei/*.xml
 
       - name: Validate against older TEI-All schema
-        uses: dracor-org/dracor-validate-action@v1.0.0
+        uses: dracor-org/dracor-validate-action@v2.0.0
         with:
           files: tei/*.xml
           version: '4.6.0'
           warn-only: 'yes'
 
       - name: Validate against current DraCor schema
-        uses: dracor-org/dracor-validate-action@v1.0.0
+        uses: dracor-org/dracor-validate-action@v2.0.0
         with:
           files: tei/*.xml
           schema: dracor
@@ -126,7 +126,7 @@ jobs:
 
       # Validate
       - name: Validate against current DraCor schema
-        uses: dracor-org/dracor-validate-action@v1.0.0
+        uses: dracor-org/dracor-validate-action@v2.0.0
         with:
           files: |
             ${{ steps.changed-tei-files.outputs.all_changed_files }}
