@@ -29771,10 +29771,21 @@ function defaultVersion(schema) {
     }
     return TEI_VERSION;
 }
+async function resolveFiles(files) {
+    let paths = [];
+    if (files.match(/\*/)) {
+        const globber = await glob.create(files.split(/\s+/).join('\n'));
+        paths = (await globber.glob()).map((p) => trimFilePath(p));
+    }
+    else {
+        paths = files.split(/\s+/);
+    }
+    return paths.filter((p) => p !== '');
+}
 function getParams() {
     const schema = coreExports.getInput('schema') || 'tei';
     const version = coreExports.getInput('version') || defaultVersion(schema);
-    const files = coreExports.getInput('files') || 'tei/*.xml';
+    const files = coreExports.getInput('files') || '';
     const warnOnly = /^(yes|true)$/i.test(coreExports.getInput('warn-only'));
     return { schema, version, files, warnOnly };
 }
@@ -37447,8 +37458,7 @@ async function run() {
         coreExports.debug(`rngFile '${rngFile}'`);
         coreExports.debug(`schematronFileName '${schematronFileName}'`);
         coreExports.summary.addHeading(`Validation against ${schemaTitle}`, '2');
-        const globber = await glob.create(files);
-        const filePaths = await globber.glob();
+        const filePaths = await resolveFiles(files);
         console.log(filePaths);
         let jingOutput = '';
         const issues = [];

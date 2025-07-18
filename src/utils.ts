@@ -1,5 +1,6 @@
-import * as core from '@actions/core';
 import { relative } from 'path';
+import * as core from '@actions/core';
+import glob from '@actions/glob';
 import { DRACOR_VERSION, TEI_VERSION } from './config.js';
 
 export interface Params {
@@ -20,10 +21,21 @@ export function defaultVersion(schema: string): string {
   return TEI_VERSION;
 }
 
+export async function resolveFiles(files: string) {
+  let paths = [];
+  if (files.match(/\*/)) {
+    const globber = await glob.create(files.split(/\s+/).join('\n'));
+    paths = (await globber.glob()).map((p) => trimFilePath(p));
+  } else {
+    paths = files.split(/\s+/);
+  }
+  return paths.filter((p) => p !== '');
+}
+
 export function getParams(): Params {
   const schema = core.getInput('schema') || 'tei';
   const version = core.getInput('version') || defaultVersion(schema);
-  const files = core.getInput('files') || 'tei/*.xml';
+  const files = core.getInput('files') || '';
   const warnOnly = /^(yes|true)$/i.test(core.getInput('warn-only'));
   return { schema, version, files, warnOnly };
 }

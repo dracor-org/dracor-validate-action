@@ -1,8 +1,12 @@
-name: "TEI validation"
-description: "Validate XML documents against TEI schema"
+name: "XML validation"
+description: "Validate XML documents against Relax NG and Schematron schemas"
 author: "Carsten Milling <cmil@hashtable.de>"
 
 inputs:
+  files:
+    description: "Files to validate"
+    required: true
+    default: ""
   schema:
     description: "Schema to validate against"
     required: false
@@ -11,10 +15,6 @@ inputs:
     description: "Schema version to validate against"
     required: false
     default: ""
-  files:
-    description: "Path or pattern to select TEI files"
-    required: false
-    default: "tei/*.xml"
   warn-only:
     description: "Exit gracefully when validation fails"
     required: false

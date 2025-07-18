@@ -1,11 +1,11 @@
 import * as core from '@actions/core';
 import { exec, ExecOptions } from '@actions/exec';
-import glob from '@actions/glob';
 import { dirname, join } from 'path';
 import { SummaryTableRow } from '@actions/core/lib/summary.js';
 import {
   getParams,
   makeLink,
+  resolveFiles,
   trimFilePath,
   truncateJingMessage,
 } from './utils.js';
@@ -66,8 +66,7 @@ export async function run(): Promise<void> {
 
     core.summary.addHeading(`Validation against ${schemaTitle}`, '2');
 
-    const globber = await glob.create(files);
-    const filePaths = await globber.glob();
+    const filePaths = await resolveFiles(files);
     console.log(filePaths);
 
     let jingOutput = '';
