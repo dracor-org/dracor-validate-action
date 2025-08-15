@@ -136,10 +136,10 @@ jobs:
 
 ## Validating locally
 
-With docker installed this action can also be run locally to validate one or
+With Docker installed this action can also be run locally to validate one or
 more TEI files. You need to mount your local TEI files to the `/tei` directory
-in the docker container and adjust the `files` input accordingly. For the
-following examples we assume you are running the docker commands from the
+in the Docker container and adjust the `files` input accordingly. For the
+following examples we assume you are running the Docker commands from the
 directory containing a directory `tei`.
 
 ```sh
