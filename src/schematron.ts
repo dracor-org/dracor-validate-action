@@ -3,7 +3,7 @@ import { tmpdir } from 'os';
 import { basename, join } from 'path';
 import { exec } from '@actions/exec';
 import * as core from '@actions/core';
-import { DOMParser } from 'xmldom';
+import { DOMParser } from '@xmldom/xmldom';
 import xpath from 'xpath';
 
 export interface SchematronAssert {
