@@ -8,8 +8,9 @@ RUN mkdir -p /usr/src/app
 WORKDIR /usr/src/app
 
 # Install dependencies
+# hadolint ignore=DL3008
 RUN apt-get update && \
-  apt-get install -y --no-install-recommends jing=20220510-2 curl=7.88.1-10+deb12u12 && \
+  apt-get install -y --no-install-recommends jing curl && \
   curl -Lsfo ./schxslt-cli.jar https://codeberg.org/SchXslt/schxslt/releases/download/v1.10.1/schxslt-cli.jar
 
 # Copy the repository contents to the container
