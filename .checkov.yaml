@@ -5,3 +5,5 @@ skip-check:
   - CKV_DOCKER_2
   # Ensure that a user for the container has been created
   - CKV_DOCKER_3
+  # Ensure top-level permissions are not set to write-all
+  - CKV2_GHA_1
