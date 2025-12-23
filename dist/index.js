@@ -33233,7 +33233,7 @@ var globExports = requireGlob();
 var glob = /*@__PURE__*/getDefaultExportFromCjs(globExports);
 
 const TEI_VERSION = '4.10.2';
-const DRACOR_VERSION = '1.0.2';
+const DRACOR_VERSION = '1.1.0';
 
 function trimFilePath(path) {
     return relative(process.cwd(), path);
@@ -43726,6 +43726,7 @@ function parseSVRL(file) {
     return results;
 }
 
+const ERRLIMIT = 1000;
 /**
  * The main function for the action.
  *
@@ -43853,7 +43854,7 @@ async function run() {
                     { data: 'Type', header: true },
                     { data: 'Message', header: true },
                 ]);
-                coreExports.summary.addTable(errorRows);
+                coreExports.summary.addTable(errorRows.slice(0, ERRLIMIT));
             }
         }
         else {
