@@ -19,6 +19,8 @@ interface ValidationError {
   columnNumber: number;
 }
 
+const ERRLIMIT = 1000;
+
 /**
  * The main function for the action.
  *
@@ -165,7 +167,7 @@ export async function run(): Promise<void> {
           { data: 'Type', header: true },
           { data: 'Message', header: true },
         ]);
-        core.summary.addTable(errorRows);
+        core.summary.addTable(errorRows.slice(0, ERRLIMIT));
       }
     } else {
       core.debug(`No files found. ('${files}')`);
