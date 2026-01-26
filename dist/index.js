@@ -43712,7 +43712,7 @@ function parseSVRL(file) {
         const { lineNumber, columnNumber } = node;
         const fileName = basename$1(document);
         results.push({
-            text,
+            text: text.replaceAll('<', '&lt;').replaceAll('@', '&#x40;'),
             location,
             role,
             context,

@@ -147,7 +147,7 @@ export function parseSVRL(file: string): SchematronAssert[] {
     const { lineNumber, columnNumber } = node;
     const fileName = basename(document);
     results.push({
-      text,
+      text: text.replaceAll('<', '&lt;').replaceAll('@', '&#x40;'),
       location,
       role,
       context,
