@@ -159,7 +159,7 @@ docker run --rm -it \
   -e INPUT_SCHEMA=tei \
   -e INPUT_VERSION='4.6.0' \
   -v $PWD/tei:/tei \
-  dracor/dracor-validate-action
+  dracor/validate-action
 ```
 
 ## Development
@@ -205,7 +205,11 @@ need to perform some initial setup steps before you can develop your action.
    You can pass individual environment variables using the `--env` or `-e` flag.
 
    ```bash
-   $ docker run --env INPUT_SCHEMA=dracor dracor/validate-action
+   $ docker run --rm \
+      --env INPUT_SCHEMA=dracor \
+      --env INPUT_FILES='/tei/*.xml' \
+      -v $PWD/tei:/tei
+      dracor/validate-action
    ...
    ```
 
