@@ -104,7 +104,7 @@ export async function run(): Promise<void> {
           errorRows.push([
             makeLink(file, lineNumber),
             `${lineNumber}:${columnNumber}`,
-            type === 'error' ? '❌' : '⚠️',
+            type === 'error' || type === 'fatal' ? '❌' : '⚠️',
             truncateJingMessage(message),
           ]);
         }
@@ -145,7 +145,9 @@ export async function run(): Promise<void> {
       const uniqueFiles = issues
         .map((e) => e.file)
         .filter((f, i, a) => a.indexOf(f) === i);
-      numErrors = issues.filter((e) => e.type === 'error').length;
+      numErrors = issues.filter(
+        (e) => e.type === 'error' || e.type === 'fatal'
+      ).length;
       numWarnings = issues.filter((e) => e.type === 'warning').length;
       const stats = [
         `Total files validated: ${filePaths.length}`,
