@@ -42,7 +42,7 @@
     "@actions/core": "^2.0.3",
     "@actions/exec": "^2.0.0",
     "@actions/github": "^9.0.0",
-    "@actions/glob": "^0.5.1",
+    "@actions/glob": "^0.6.1",
     "@xmldom/xmldom": "^0.8.11",
     "xpath": "^0.0.34"
   },
