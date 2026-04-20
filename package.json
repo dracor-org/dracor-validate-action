@@ -43,7 +43,7 @@
     "@actions/exec": "^2.0.0",
     "@actions/github": "^9.1.0",
     "@actions/glob": "^0.5.1",
-    "@xmldom/xmldom": "^0.8.11",
+    "@xmldom/xmldom": "^0.9.10",
     "xpath": "^0.0.34"
   },
   "devDependencies": {
