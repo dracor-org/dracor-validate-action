@@ -13,6 +13,8 @@ export const summary = {
   addHeading: jest.fn<typeof core.summary.addHeading>(),
   addRaw: jest.fn<typeof core.summary.addRaw>(),
   addBreak: jest.fn<typeof core.summary.addBreak>(),
+  addList: jest.fn<typeof core.summary.addList>(),
+  addTable: jest.fn<typeof core.summary.addTable>(),
   stringify: jest.fn<typeof core.summary.stringify>(),
   write: jest.fn<typeof core.summary.write>(),
 };
