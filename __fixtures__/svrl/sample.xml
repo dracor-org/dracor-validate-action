@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt>
+        <title>Sample</title>
+      </titleStmt>
+      <publicationStmt>
+        <p>Fixture</p>
+      </publicationStmt>
+      <sourceDesc>
+        <p>Fixture</p>
+      </sourceDesc>
+    </fileDesc>
+  </teiHeader>
+  <text>
+    <body>
+      <div type="act" n="1">
+        <sp who="#char1">
+          <p>Hello.</p>
+        </sp>
+      </div>
+    </body>
+  </text>
+</TEI>
