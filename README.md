@@ -29,8 +29,8 @@ The schema to validate. Supported values are:
 
 ### `version`
 
-The schema version to validate against. The defaults are `"4.9.0"` for TEI-All
-and `"1.0.0"` for the DraCor schema.
+The schema version to validate against. The defaults are `"4.11.0"` for TEI-All
+and `"1.5.1"` for the DraCor schema.
 
 ### `warn-only`
 
