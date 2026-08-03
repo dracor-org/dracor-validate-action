@@ -33686,8 +33686,8 @@ function requireGlob () {
 var globExports = requireGlob();
 var glob = /*@__PURE__*/getDefaultExportFromCjs(globExports);
 
-const TEI_VERSION = '4.11.0';
-const DRACOR_VERSION = '1.5.1';
+const TEI_VERSION = '4.12.0';
+const DRACOR_VERSION = '1.6.0';
 
 function trimFilePath(path) {
     return relative(process.cwd(), path);
