@@ -16,16 +16,16 @@ action layout, workflow suite).
 
 ## Commands
 
-- `npm install` — install dependencies
-- `npm test` — run Jest tests (uses `--experimental-vm-modules` because the
+- `pnpm install` — install dependencies
+- `pnpm test` — run Jest tests (uses `--experimental-vm-modules` because the
   project is pure ESM)
-- `npx jest __tests__/utils.test.ts` — run a single test file
-- `npx jest -t "pattern"` — run tests matching a name pattern
-- `npm run lint` — ESLint
-- `npm run format:write` / `format:check` — Prettier
-- `npm run package` — Rollup-bundle `src/index.ts` → `dist/index.js`
-- `npm run bundle` — format + package (run before committing)
-- `npm run all` — full pre-commit workflow: format, lint, test, coverage,
+- `pnpm exec jest __tests__/utils.test.ts` — run a single test file
+- `pnpm exec jest -t "pattern"` — run tests matching a name pattern
+- `pnpm run lint` — ESLint
+- `pnpm run format:write` / `format:check` — Prettier
+- `pnpm run package` — Rollup-bundle `src/index.ts` → `dist/index.js`
+- `pnpm run bundle` — format + package (run before committing)
+- `pnpm run all` — full pre-commit workflow: format, lint, test, coverage,
   package
 
 ## Architecture
@@ -65,7 +65,7 @@ new schema version: drop the files into `schemas/`, bump the constant in
 
 The `dist/` directory is checked in and must match the source. The
 [.github/workflows/check-dist.yml](.github/workflows/check-dist.yml) CI check
-fails PRs whose `dist/` drifts. Always run `npm run bundle` (or `npm run all`)
+fails PRs whose `dist/` drifts. Always run `pnpm run bundle` (or `pnpm run all`)
 before committing changes to `src/`.
 
 ## Testing conventions
@@ -78,4 +78,7 @@ ESM enabled — imports in source use explicit `.js` extensions (e.g.
 
 ## Package manager
 
-The lockfile is `package-lock.json` (npm); CI + Docker build use `npm ci`.
+The lockfile is `pnpm-lock.yaml`; the pnpm version is pinned via the
+`packageManager` field in [package.json](package.json). CI installs pnpm via
+`pnpm/action-setup` and runs `pnpm install --frozen-lockfile`. The Dockerfile
+copies the prebuilt `dist/` and does not run a package manager.
