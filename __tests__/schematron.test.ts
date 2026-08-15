@@ -1,10 +1,10 @@
-import { jest } from '@jest/globals';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 import * as exec from '../__fixtures__/exec.js';
 
-jest.unstable_mockModule('@actions/exec', () => exec);
+vi.mock('@actions/exec', () => exec);
 
 const { validate, runSchxslt, parseSVRL } =
   await import('../src/schematron.js');
@@ -21,7 +21,7 @@ function writeSvrlFixture(): string {
 
 describe('schematron.ts', () => {
   afterEach(() => {
-    jest.resetAllMocks();
+    vi.resetAllMocks();
   });
 
   describe('parseSVRL', () => {
