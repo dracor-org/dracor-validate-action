@@ -1,4 +1,11 @@
 /tei
 /node_modules
+/dist
+/coverage
 /__fixtures__
 /__tests__
+/.git
+/.github
+/.claude
+/badges
+*.md

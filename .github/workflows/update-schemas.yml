@@ -33,7 +33,7 @@ jobs:
 
       - name: Run update script
         id: update
-        run: node scripts/update-schemas.mjs | tee /tmp/summary.txt
+        run: node scripts/update-schemas.js | tee /tmp/summary.txt
 
       - name: Detect changes
         id: check
