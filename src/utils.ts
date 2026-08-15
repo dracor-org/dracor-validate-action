@@ -22,7 +22,7 @@ export function defaultVersion(schema: string): string {
 }
 
 export async function resolveFiles(files: string) {
-  let paths = [];
+  let paths: string[];
   if (files.match(/\*/)) {
     const globber = await glob.create(files.split(/\s+/).join('\n'));
     paths = (await globber.glob()).map((p) => trimFilePath(p));

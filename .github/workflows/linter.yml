@@ -7,8 +7,6 @@ name: Lint Codebase
 
 on:
   pull_request:
-    branches:
-      - main
   push:
     branches:
       - main
@@ -31,18 +29,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Install pnpm (version pinned by the `packageManager` field in package.json).
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
       # Setup Node.js using the version specified in `.node-version`.
       - name: Setup Node.js
         id: setup-node
         uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
-          cache: npm
+          cache: pnpm
 
-      # Install dependencies using `npm ci`.
       - name: Install Dependencies
         id: install
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       # Lint the codebase using the `super-linter/super-linter` action.
       - name: Lint Codebase
@@ -50,7 +51,7 @@ jobs:
         uses: super-linter/super-linter/slim@v8
         env:
           DEFAULT_BRANCH: main
-          FILTER_REGEX_EXCLUDE: "(^|/)(dist|schemas)(/|$)"
+          FILTER_REGEX_EXCLUDE: "(^|/)(dist|schemas)(/|$)|(^|/)pnpm-lock\\.yaml$"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LINTER_RULES_PATH: ${{ github.workspace }}
           VALIDATE_ALL_CODEBASE: true

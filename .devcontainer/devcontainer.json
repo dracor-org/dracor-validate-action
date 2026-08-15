@@ -1,7 +1,7 @@
 {
   "name": "GitHub Actions (Container Toolkit)",
   "image": "mcr.microsoft.com/devcontainers/typescript-node:20",
-  "postCreateCommand": "npm install",
+  "postCreateCommand": "npm install -g pnpm && pnpm install",
   "customizations": {
     "codespaces": {
       "openFiles": ["README.md"]

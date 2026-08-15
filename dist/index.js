@@ -1156,6 +1156,24 @@ function requireErrors () {
 	  [kSecureProxyConnectionError] = true
 	}
 
+	const kMessageSizeExceededError = Symbol.for('undici.error.UND_ERR_WS_MESSAGE_SIZE_EXCEEDED');
+	class MessageSizeExceededError extends UndiciError {
+	  constructor (message) {
+	    super(message);
+	    this.name = 'MessageSizeExceededError';
+	    this.message = message || 'Max decompressed message size exceeded';
+	    this.code = 'UND_ERR_WS_MESSAGE_SIZE_EXCEEDED';
+	  }
+
+	  static [Symbol.hasInstance] (instance) {
+	    return instance && instance[kMessageSizeExceededError] === true
+	  }
+
+	  get [kMessageSizeExceededError] () {
+	    return true
+	  }
+	}
+
 	errors = {
 	  AbortError,
 	  HTTPParserError,
@@ -1179,7 +1197,8 @@ function requireErrors () {
 	  ResponseExceededMaxSizeError,
 	  RequestRetryError,
 	  ResponseError,
-	  SecureProxyConnectionError
+	  SecureProxyConnectionError,
+	  MessageSizeExceededError
 	};
 	return errors;
 }
@@ -2480,6 +2499,10 @@ function requireRequest$1 () {
 	      throw new InvalidArgumentError('upgrade must be a string')
 	    }
 
+	    if (upgrade && !isValidHeaderValue(upgrade)) {
+	      throw new InvalidArgumentError('invalid upgrade header')
+	    }
+
 	    if (headersTimeout != null && (!Number.isFinite(headersTimeout) || headersTimeout < 0)) {
 	      throw new InvalidArgumentError('invalid headersTimeout')
 	    }
@@ -2760,7 +2783,13 @@ function requireRequest$1 () {
 	      } else if (typeof val[i] === 'object') {
 	        throw new InvalidArgumentError(`invalid ${key} header`)
 	      } else {
-	        arr.push(`${val[i]}`);
+	        // Coerce primitives (and reject unsafe coercions such as functions
+	        // with a crafted toString/Symbol.toPrimitive).
+	        const str = `${val[i]}`;
+	        if (!isValidHeaderValue(str)) {
+	          throw new InvalidArgumentError(`invalid ${key} header`)
+	        }
+	        arr.push(str);
 	      }
 	    }
 	    val = arr;
@@ -2771,16 +2800,27 @@ function requireRequest$1 () {
 	  } else if (val === null) {
 	    val = '';
 	  } else {
+	    // Coerce primitives (and reject unsafe coercions such as functions
+	    // with a crafted toString/Symbol.toPrimitive).
 	    val = `${val}`;
+	    if (!isValidHeaderValue(val)) {
+	      throw new InvalidArgumentError(`invalid ${key} header`)
+	    }
 	  }
 
-	  if (request.host === null && headerName === 'host') {
+	  if (headerName === 'host') {
+	    if (request.host !== null) {
+	      throw new InvalidArgumentError('duplicate host header')
+	    }
 	    if (typeof val !== 'string') {
 	      throw new InvalidArgumentError('invalid host header')
 	    }
 	    // Consumed by Client
 	    request.host = val;
-	  } else if (request.contentLength === null && headerName === 'content-length') {
+	  } else if (headerName === 'content-length') {
+	    if (request.contentLength !== null) {
+	      throw new InvalidArgumentError('duplicate content-length header')
+	    }
 	    request.contentLength = parseInt(val, 10);
 	    if (!Number.isFinite(request.contentLength)) {
 	      throw new InvalidArgumentError('invalid content-length header')
@@ -2901,15 +2941,24 @@ function requireDispatcherBase () {
 	const kOnDestroyed = Symbol('onDestroyed');
 	const kOnClosed = Symbol('onClosed');
 	const kInterceptedDispatch = Symbol('Intercepted Dispatch');
+	const kWebSocketOptions = Symbol('webSocketOptions');
 
 	class DispatcherBase extends Dispatcher {
-	  constructor () {
+	  constructor (opts) {
 	    super();
 
 	    this[kDestroyed] = false;
 	    this[kOnDestroyed] = null;
 	    this[kClosed] = false;
 	    this[kOnClosed] = [];
+	    this[kWebSocketOptions] = opts?.webSocket ?? {};
+	  }
+
+	  get webSocketOptions () {
+	    return {
+	      maxFragments: this[kWebSocketOptions].maxFragments ?? 131072,
+	      maxPayloadSize: this[kWebSocketOptions].maxPayloadSize ?? 128 * 1024 * 1024
+	    }
 	  }
 
 	  get destroyed () {
@@ -8812,6 +8861,7 @@ function requireClientH1 () {
 	  RequestContentLengthMismatchError,
 	  ResponseContentLengthMismatchError,
 	  RequestAbortedError,
+	  InvalidArgumentError,
 	  HeadersTimeoutError,
 	  HeadersOverflowError,
 	  SocketError,
@@ -8859,6 +8909,9 @@ function requireClientH1 () {
 	const FastBuffer = Buffer[Symbol.species];
 	const addListener = util.addListener;
 	const removeAllListeners = util.removeAllListeners;
+	const kIdleSocketValidation = Symbol('kIdleSocketValidation');
+	const kIdleSocketValidationTimeout = Symbol('kIdleSocketValidationTimeout');
+	const kSocketUsed = Symbol('kSocketUsed');
 
 	let extractBody;
 
@@ -9081,27 +9134,69 @@ function requireClientH1 () {
 
 	      const offset = llhttp.llhttp_get_error_pos(this.ptr) - currentBufferPtr;
 
-	      if (ret === constants.ERROR.PAUSED_UPGRADE) {
-	        this.onUpgrade(data.slice(offset));
-	      } else if (ret === constants.ERROR.PAUSED) {
-	        this.paused = true;
-	        socket.unshift(data.slice(offset));
-	      } else if (ret !== constants.ERROR.OK) {
-	        const ptr = llhttp.llhttp_get_error_reason(this.ptr);
-	        let message = '';
-	        /* istanbul ignore else: difficult to make a test case for */
-	        if (ptr) {
-	          const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
-	          message =
-	            'Response does not match the HTTP/1.1 protocol (' +
-	            Buffer.from(llhttp.memory.buffer, ptr, len).toString() +
-	            ')';
+	      if (ret !== constants.ERROR.OK) {
+	        const body = data.subarray(offset);
+
+	        if (ret === constants.ERROR.PAUSED_UPGRADE) {
+	          this.onUpgrade(body);
+	        } else if (ret === constants.ERROR.PAUSED) {
+	          this.paused = true;
+	          socket.unshift(body);
+	        } else {
+	          throw this.createError(ret, body)
 	        }
-	        throw new HTTPParserError(message, constants.ERROR[ret], data.slice(offset))
 	      }
 	    } catch (err) {
 	      util.destroy(socket, err);
 	    }
+	  }
+
+	  finish () {
+	    assert(currentParser === null);
+	    assert(this.ptr != null);
+	    assert(!this.paused);
+
+	    const { llhttp } = this;
+
+	    let ret;
+
+	    try {
+	      currentParser = this;
+	      ret = llhttp.llhttp_finish(this.ptr);
+	    } finally {
+	      currentParser = null;
+	    }
+
+	    if (ret === constants.ERROR.OK) {
+	      return null
+	    }
+
+	    if (ret === constants.ERROR.PAUSED || ret === constants.ERROR.PAUSED_UPGRADE) {
+	      this.paused = true;
+	      return null
+	    }
+
+	    return this.createError(ret, EMPTY_BUF)
+	  }
+
+	  createError (ret, data) {
+	    const { llhttp, contentLength, bytesRead } = this;
+
+	    if (contentLength && bytesRead !== parseInt(contentLength, 10)) {
+	      return new ResponseContentLengthMismatchError()
+	    }
+
+	    const ptr = llhttp.llhttp_get_error_reason(this.ptr);
+	    let message = '';
+	    if (ptr) {
+	      const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
+	      message =
+	        'Response does not match the HTTP/1.1 protocol (' +
+	        Buffer.from(llhttp.memory.buffer, ptr, len).toString() +
+	        ')';
+	    }
+
+	    return new HTTPParserError(message, constants.ERROR[ret], data)
 	  }
 
 	  destroy () {
@@ -9128,6 +9223,11 @@ function requireClientH1 () {
 
 	    /* istanbul ignore next: difficult to make a test case for */
 	    if (socket.destroyed) {
+	      return -1
+	    }
+
+	    if (client[kRunning] === 0) {
+	      util.destroy(socket, new SocketError('bad response', util.getSocketInfo(socket)));
 	      return -1
 	    }
 
@@ -9231,6 +9331,11 @@ function requireClientH1 () {
 
 	    /* istanbul ignore next: difficult to make a test case for */
 	    if (socket.destroyed) {
+	      return -1
+	    }
+
+	    if (client[kRunning] === 0) {
+	      util.destroy(socket, new SocketError('bad response', util.getSocketInfo(socket)));
 	      return -1
 	    }
 
@@ -9407,6 +9512,7 @@ function requireClientH1 () {
 	    request.onComplete(headers);
 
 	    client[kQueue][client[kRunningIdx]++] = null;
+	    socket[kSocketUsed] = true;
 
 	    if (socket[kWriting]) {
 	      assert(client[kRunning] === 0);
@@ -9465,6 +9571,9 @@ function requireClientH1 () {
 	  socket[kWriting] = false;
 	  socket[kReset] = false;
 	  socket[kBlocking] = false;
+	  socket[kIdleSocketValidation] = 0;
+	  socket[kIdleSocketValidationTimeout] = null;
+	  socket[kSocketUsed] = false;
 	  socket[kParser] = new Parser(client, socket, llhttpInstance);
 
 	  addListener(socket, 'error', function (err) {
@@ -9475,8 +9584,11 @@ function requireClientH1 () {
 	    // On Mac OS, we get an ECONNRESET even if there is a full body to be forwarded
 	    // to the user.
 	    if (err.code === 'ECONNRESET' && parser.statusCode && !parser.shouldKeepAlive) {
-	      // We treat all incoming data so for as a valid response.
-	      parser.onMessageComplete();
+	      const parserErr = parser.finish();
+	      if (parserErr) {
+	        this[kError] = parserErr;
+	        this[kClient][kOnError](parserErr);
+	      }
 	      return
 	    }
 
@@ -9495,8 +9607,10 @@ function requireClientH1 () {
 	    const parser = this[kParser];
 
 	    if (parser.statusCode && !parser.shouldKeepAlive) {
-	      // We treat all incoming data so far as a valid response.
-	      parser.onMessageComplete();
+	      const parserErr = parser.finish();
+	      if (parserErr) {
+	        util.destroy(this, parserErr);
+	      }
 	      return
 	    }
 
@@ -9506,10 +9620,11 @@ function requireClientH1 () {
 	    const client = this[kClient];
 	    const parser = this[kParser];
 
+	    clearIdleSocketValidation(this);
+
 	    if (parser) {
 	      if (!this[kError] && parser.statusCode && !parser.shouldKeepAlive) {
-	        // We treat all incoming data so far as a valid response.
-	        parser.onMessageComplete();
+	        this[kError] = parser.finish() || this[kError];
 	      }
 
 	      this[kParser].destroy();
@@ -9572,7 +9687,7 @@ function requireClientH1 () {
 	      return socket.destroyed
 	    },
 	    busy (request) {
-	      if (socket[kWriting] || socket[kReset] || socket[kBlocking]) {
+	      if (socket[kWriting] || socket[kReset] || socket[kBlocking] || socket[kIdleSocketValidation] === 1) {
 	        return true
 	      }
 
@@ -9610,6 +9725,31 @@ function requireClientH1 () {
 	  }
 	}
 
+	function clearIdleSocketValidation (socket) {
+	  if (socket[kIdleSocketValidationTimeout]) {
+	    clearTimeout(socket[kIdleSocketValidationTimeout]);
+	    socket[kIdleSocketValidationTimeout] = null;
+	  }
+
+	  socket[kIdleSocketValidation] = 0;
+	}
+
+	function scheduleIdleSocketValidation (client, socket) {
+	  socket[kIdleSocketValidation] = 1;
+	  socket[kIdleSocketValidationTimeout] = setTimeout(() => {
+	    socket[kIdleSocketValidationTimeout] = null;
+	    socket[kIdleSocketValidation] = 2;
+
+	    if (client[kSocket] === socket && !socket.destroyed) {
+	      client[kResume]();
+	    }
+	  }, 0);
+	  socket[kIdleSocketValidationTimeout].unref?.();
+	}
+
+	/**
+	 * @param {import('./client.js')} client
+	 */
 	function resumeH1 (client) {
 	  const socket = client[kSocket];
 
@@ -9622,6 +9762,32 @@ function requireClientH1 () {
 	    } else if (socket[kNoRef] && socket.ref) {
 	      socket.ref();
 	      socket[kNoRef] = false;
+	    }
+
+	    if (client[kRunning] === 0 && client[kPending] > 0 && socket[kSocketUsed]) {
+	      if (socket[kIdleSocketValidation] === 0) {
+	        scheduleIdleSocketValidation(client, socket);
+	        socket[kParser].readMore();
+	        if (socket.destroyed) {
+	          return
+	        }
+	        return
+	      }
+
+	      if (socket[kIdleSocketValidation] === 1) {
+	        socket[kParser].readMore();
+	        if (socket.destroyed) {
+	          return
+	        }
+	        return
+	      }
+	    }
+
+	    if (client[kRunning] === 0) {
+	      socket[kParser].readMore();
+	      if (socket.destroyed) {
+	        return
+	      }
 	    }
 
 	    if (client[kSize] === 0) {
@@ -9679,8 +9845,16 @@ function requireClientH1 () {
 	    }
 	    body = bodyStream.stream;
 	    contentLength = bodyStream.length;
-	  } else if (util.isBlobLike(body) && request.contentType == null && body.type) {
-	    headers.push('content-type', body.type);
+	  } else if (util.isBlobLike(body) && request.contentType == null) {
+	    const contentType = body.type;
+	    if (contentType) {
+	      const contentTypeValue = `${contentType}`;
+	      if (!util.isValidHeaderValue(contentTypeValue)) {
+	        util.errorRequest(client, request, new InvalidArgumentError('invalid content-type header'));
+	        return false
+	      }
+	      headers.push('content-type', contentTypeValue);
+	    }
 	  }
 
 	  if (body && typeof body.read === 'function') {
@@ -9717,6 +9891,7 @@ function requireClientH1 () {
 	  }
 
 	  const socket = client[kSocket];
+	  clearIdleSocketValidation(socket);
 
 	  const abort = (err) => {
 	    if (request.aborted || request.completed) {
@@ -11287,9 +11462,10 @@ function requireClient () {
 	    autoSelectFamilyAttemptTimeout,
 	    // h2
 	    maxConcurrentStreams,
-	    allowH2
+	    allowH2,
+	    webSocket
 	  } = {}) {
-	    super();
+	    super({ webSocket });
 
 	    if (keepAlive !== undefined) {
 	      throw new InvalidArgumentError('unsupported keepAlive, use pipelining=0 instead')
@@ -11996,8 +12172,8 @@ function requirePoolBase () {
 	const kStats = Symbol('stats');
 
 	class PoolBase extends DispatcherBase {
-	  constructor () {
-	    super();
+	  constructor (opts) {
+	    super(opts);
 
 	    this[kQueue] = new FixedQueue();
 	    this[kClients] = [];
@@ -12216,8 +12392,6 @@ function requirePool () {
 	    allowH2,
 	    ...options
 	  } = {}) {
-	    super();
-
 	    if (connections != null && (!Number.isFinite(connections) || connections < 0)) {
 	      throw new InvalidArgumentError('invalid connections')
 	    }
@@ -12241,6 +12415,8 @@ function requirePool () {
 	        ...connect
 	      });
 	    }
+
+	    super(options);
 
 	    this[kInterceptors] = options.interceptors?.Pool && Array.isArray(options.interceptors.Pool)
 	      ? options.interceptors.Pool
@@ -12535,8 +12711,6 @@ function requireAgent () {
 
 	class Agent extends DispatcherBase {
 	  constructor ({ factory = defaultFactory, maxRedirections = 0, connect, ...options } = {}) {
-	    super();
-
 	    if (typeof factory !== 'function') {
 	      throw new InvalidArgumentError('factory must be a function.')
 	    }
@@ -12548,6 +12722,8 @@ function requireAgent () {
 	    if (!Number.isInteger(maxRedirections) || maxRedirections < 0) {
 	      throw new InvalidArgumentError('maxRedirections must be a positive number')
 	    }
+
+	    super(options);
 
 	    if (connect && typeof connect !== 'function') {
 	      connect = { ...connect };
@@ -13113,6 +13289,28 @@ function requireRetryHandler () {
 	  return new Date(retryAfter).getTime() - current
 	}
 
+	function validatePartialResponseContentLength (headers, range, statusCode, retryCount) {
+	  const contentLength = headers['content-length'];
+	  if (contentLength == null) {
+	    return null
+	  }
+
+	  if (!Number.isFinite(range.start) || !Number.isFinite(range.end)) {
+	    return null
+	  }
+
+	  const length = Number(contentLength);
+	  const expectedLength = range.end - range.start + 1;
+	  if (!Number.isFinite(length) || length !== expectedLength) {
+	    return new RequestRetryError('Content-Length mismatch', statusCode, {
+	      headers,
+	      data: { count: retryCount }
+	    })
+	  }
+
+	  return null
+	}
+
 	class RetryHandler {
 	  constructor (opts, handlers) {
 	    const { retryOptions, ...dispatchOpts } = opts;
@@ -13327,6 +13525,12 @@ function requireRetryHandler () {
 	        return false
 	      }
 
+	      const contentLengthError = validatePartialResponseContentLength(headers, contentRange, statusCode, this.retryCount);
+	      if (contentLengthError != null) {
+	        this.abort(contentLengthError);
+	        return false
+	      }
+
 	      const { start, size, end = size - 1 } = contentRange;
 
 	      assert(this.start === start, 'content-range mismatch');
@@ -13348,6 +13552,12 @@ function requireRetryHandler () {
 	            resume,
 	            statusMessage
 	          )
+	        }
+
+	        const contentLengthError = validatePartialResponseContentLength(headers, range, statusCode, this.retryCount);
+	        if (contentLengthError != null) {
+	          this.abort(contentLengthError);
+	          return false
 	        }
 
 	        const { start, size, end = size - 1 } = range;
@@ -23738,7 +23948,7 @@ function requireUtil$2 () {
 
 	    if (
 	      code < 0x20 || // exclude CTLs (0-31)
-	      code === 0x7F || // DEL
+	      code > 0x7E || // exclude DEL and non-ascii
 	      code === 0x3B // ;
 	    ) {
 	      throw new Error('Invalid cookie path')
@@ -23747,16 +23957,80 @@ function requireUtil$2 () {
 	}
 
 	/**
-	 * I have no idea why these values aren't allowed to be honest,
-	 * but Deno tests these. - Khafra
+	 * <let-dig> ::= <letter> | <digit>
+	 *
+	 * <letter> ::= any one of the 52 alphabetic characters A through Z in
+	 * upper case and a through z in lower case
+	 *
+	 * <digit> ::= any one of the ten digits 0 through 9r
+	 *
+	 * @see https://www.rfc-editor.org/rfc/rfc1034#section-3.5
+	 * @param {number} code
+	 */
+	function isLetterOrDigit (code) {
+	  return (
+	    (code >= 0x30 && code <= 0x39) || // 0-9
+	    (code >= 0x41 && code <= 0x5A) || // A-Z
+	    (code >= 0x61 && code <= 0x7A) // a-z
+	  )
+	}
+
+	/**
+	 * Validates a cookie domain against the "preferred name syntax".
+	 *
+	 * <domain>      ::= <subdomain> | " "
+	 * <subdomain>   ::= <label> | <subdomain> "." <label>
+	 * <label>       ::= <let-dig> [ [ <ldh-str> ] <let-dig> ]
+	 * <ldh-str>     ::= <let-dig-hyp> | <let-dig-hyp> <ldh-str>
+	 * <let-dig-hyp> ::= <let-dig> | "-"
+	 *
+	 * @see https://www.rfc-editor.org/rfc/rfc1034#section-3.5
+	 * @see https://www.rfc-editor.org/rfc/rfc1123#section-2.1
+	 * @see https://www.rfc-editor.org/rfc/rfc1035#section-2.3.4
 	 * @param {string} domain
 	 */
 	function validateCookieDomain (domain) {
-	  if (
-	    domain.startsWith('-') ||
-	    domain.endsWith('.') ||
-	    domain.endsWith('-')
-	  ) {
+	  // <domain> ::= <subdomain> | " "
+	  if (domain === ' ') {
+	    return
+	  }
+
+	  if (domain.length > 255) {
+	    throw new Error('Invalid cookie domain')
+	  }
+
+	  let labelLength = 0;
+
+	  for (let i = 0; i < domain.length; ++i) {
+	    const code = domain.charCodeAt(i);
+
+	    if (code === 0x2E) {
+	      if (labelLength === 0) {
+	        throw new Error('Invalid cookie domain')
+	      }
+
+	      if (domain.charCodeAt(i - 1) === 0x2D) { // "-"
+	        throw new Error('Invalid cookie domain')
+	      }
+
+	      labelLength = 0;
+	      continue
+	    }
+
+	    if (labelLength === 0 && !isLetterOrDigit(code)) {
+	      throw new Error('Invalid cookie domain')
+	    }
+
+	    if (!isLetterOrDigit(code) && code !== 0x2D) { // "-"
+	      throw new Error('Invalid cookie domain')
+	    }
+
+	    if (++labelLength > 63) {
+	      throw new Error('Invalid cookie domain')
+	    }
+	  }
+
+	  if (labelLength === 0 || domain.charCodeAt(domain.length - 1) === 0x2D) { // "-"
 	    throw new Error('Invalid cookie domain')
 	  }
 	}
@@ -23899,7 +24173,13 @@ function requireUtil$2 () {
 
 	    const [key, ...value] = part.split('=');
 
-	    out.push(`${key.trim()}=${value.join('=')}`);
+	    const trimmedKey = key.trim();
+	    const joinedValue = value.join('=');
+
+	    validateCookieName(trimmedKey);
+	    validateCookieValue(joinedValue);
+
+	    out.push(`${trimmedKey}=${joinedValue}`);
 	  }
 
 	  return out.join('; ')
@@ -24198,32 +24478,25 @@ function requireParse () {
 	    // If the attribute-name case-insensitively matches the string
 	    // "SameSite", the user agent MUST process the cookie-av as follows:
 
-	    // 1. Let enforcement be "Default".
-	    let enforcement = 'Default';
-
 	    const attributeValueLowercase = attributeValue.toLowerCase();
-	    // 2. If cookie-av's attribute-value is a case-insensitive match for
-	    //    "None", set enforcement to "None".
-	    if (attributeValueLowercase.includes('none')) {
-	      enforcement = 'None';
-	    }
 
-	    // 3. If cookie-av's attribute-value is a case-insensitive match for
-	    //    "Strict", set enforcement to "Strict".
-	    if (attributeValueLowercase.includes('strict')) {
-	      enforcement = 'Strict';
+	    // 1. If cookie-av's attribute-value is a case-insensitive match for
+	    //    "None", append an attribute to the cookie-attribute-list with an
+	    //    attribute-name of "SameSite" and an attribute-value of "None".
+	    if (attributeValueLowercase === 'none') {
+	      cookieAttributeList.sameSite = 'None';
+	    } else if (attributeValueLowercase === 'strict') {
+	      // 2. If cookie-av's attribute-value is a case-insensitive match for
+	      //    "Strict", append an attribute to the cookie-attribute-list with
+	      //    an attribute-name of "SameSite" and an attribute-value of
+	      //    "Strict".
+	      cookieAttributeList.sameSite = 'Strict';
+	    } else if (attributeValueLowercase === 'lax') {
+	      // 3. If cookie-av's attribute-value is a case-insensitive match for
+	      //    "Lax", append an attribute to the cookie-attribute-list with an
+	      //    attribute-name of "SameSite" and an attribute-value of "Lax".
+	      cookieAttributeList.sameSite = 'Lax';
 	    }
-
-	    // 4. If cookie-av's attribute-value is a case-insensitive match for
-	    //    "Lax", set enforcement to "Lax".
-	    if (attributeValueLowercase.includes('lax')) {
-	      enforcement = 'Lax';
-	    }
-
-	    // 5. Append an attribute to the cookie-attribute-list with an
-	    //    attribute-name of "SameSite" and an attribute-value of
-	    //    enforcement.
-	    cookieAttributeList.sameSite = enforcement;
 	  } else {
 	    cookieAttributeList.unparsed ??= [];
 
@@ -25137,6 +25410,12 @@ function requireUtil$1 () {
 	 * @param {string} value
 	 */
 	function isValidClientWindowBits (value) {
+	  // Must have at least one character
+	  if (value.length === 0) {
+	    return false
+	  }
+
+	  // Check all characters are ASCII digits
 	  for (let i = 0; i < value.length; i++) {
 	    const byte = value.charCodeAt(i);
 
@@ -25145,7 +25424,9 @@ function requireUtil$1 () {
 	    }
 	  }
 
-	  return true
+	  // Check numeric range: zlib requires windowBits in range 8-15
+	  const num = Number.parseInt(value, 10);
+	  return num >= 8 && num <= 15
 	}
 
 	// https://nodejs.org/api/intl.html#detecting-internationalization-support
@@ -25675,6 +25956,7 @@ function requirePermessageDeflate () {
 
 	const { createInflateRaw, Z_DEFAULT_WINDOWBITS } = require$$1$3;
 	const { isValidClientWindowBits } = requireUtil$1();
+	const { MessageSizeExceededError } = requireErrors();
 
 	const tail = Buffer.from([0x00, 0x00, 0xff, 0xff]);
 	const kBuffer = Symbol('kBuffer');
@@ -25686,17 +25968,29 @@ function requirePermessageDeflate () {
 
 	  #options = {}
 
-	  constructor (extensions) {
+	  #maxPayloadSize = 0
+
+	  /**
+	   * @param {Map<string, string>} extensions
+	   */
+	  constructor (extensions, options) {
 	    this.#options.serverNoContextTakeover = extensions.has('server_no_context_takeover');
 	    this.#options.serverMaxWindowBits = extensions.get('server_max_window_bits');
+
+	    this.#maxPayloadSize = options.maxPayloadSize;
 	  }
 
+	  /**
+	   * Decompress a compressed payload.
+	   * @param {Buffer} chunk Compressed data
+	   * @param {boolean} fin Final fragment flag
+	   * @param {Function} callback Callback function
+	   */
 	  decompress (chunk, fin, callback) {
 	    // An endpoint uses the following algorithm to decompress a message.
 	    // 1.  Append 4 octets of 0x00 0x00 0xff 0xff to the tail end of the
 	    //     payload of the message.
 	    // 2.  Decompress the resulting data using DEFLATE.
-
 	    if (!this.#inflate) {
 	      let windowBits = Z_DEFAULT_WINDOWBITS;
 
@@ -25709,13 +26003,26 @@ function requirePermessageDeflate () {
 	        windowBits = Number.parseInt(this.#options.serverMaxWindowBits);
 	      }
 
-	      this.#inflate = createInflateRaw({ windowBits });
+	      try {
+	        this.#inflate = createInflateRaw({ windowBits });
+	      } catch (err) {
+	        callback(err);
+	        return
+	      }
 	      this.#inflate[kBuffer] = [];
 	      this.#inflate[kLength] = 0;
 
 	      this.#inflate.on('data', (data) => {
-	        this.#inflate[kBuffer].push(data);
 	        this.#inflate[kLength] += data.length;
+
+	        if (this.#maxPayloadSize > 0 && this.#inflate[kLength] > this.#maxPayloadSize) {
+	          callback(new MessageSizeExceededError());
+	          this.#inflate.removeAllListeners();
+	          this.#inflate = null;
+	          return
+	        }
+
+	        this.#inflate[kBuffer].push(data);
 	      });
 
 	      this.#inflate.on('error', (err) => {
@@ -25730,6 +26037,10 @@ function requirePermessageDeflate () {
 	    }
 
 	    this.#inflate.flush(() => {
+	      if (!this.#inflate) {
+	        return
+	      }
+
 	      const full = Buffer.concat(this.#inflate[kBuffer], this.#inflate[kLength]);
 
 	      this.#inflate[kBuffer].length = 0;
@@ -25769,6 +26080,12 @@ function requireReceiver () {
 	const { WebsocketFrameSend } = requireFrame();
 	const { closeWebSocketConnection } = requireConnection();
 	const { PerMessageDeflate } = requirePermessageDeflate();
+	const { MessageSizeExceededError } = requireErrors();
+
+	function failWebsocketConnectionWithCode (ws, code, reason) {
+	  closeWebSocketConnection(ws, code, reason, Buffer.byteLength(reason));
+	  failWebsocketConnection(ws, reason);
+	}
 
 	// This code was influenced by ws released under the MIT license.
 	// Copyright (c) 2011 Einar Otto Stangvik <einaros@gmail.com>
@@ -25777,6 +26094,7 @@ function requireReceiver () {
 
 	class ByteParser extends Writable {
 	  #buffers = []
+	  #fragmentsBytes = 0
 	  #byteOffset = 0
 	  #loop = false
 
@@ -25788,14 +26106,27 @@ function requireReceiver () {
 	  /** @type {Map<string, PerMessageDeflate>} */
 	  #extensions
 
-	  constructor (ws, extensions) {
+	  /** @type {number} */
+	  #maxFragments
+
+	  /** @type {number} */
+	  #maxPayloadSize
+
+	  /**
+	   * @param {import('./websocket').WebSocket} ws
+	   * @param {Map<string, string>|null} extensions
+	   * @param {{ maxFragments?: number, maxPayloadSize?: number }} [options]
+	   */
+	  constructor (ws, extensions, options = {}) {
 	    super();
 
 	    this.ws = ws;
 	    this.#extensions = extensions == null ? new Map() : extensions;
+	    this.#maxFragments = options.maxFragments ?? 0;
+	    this.#maxPayloadSize = options.maxPayloadSize ?? 0;
 
 	    if (this.#extensions.has('permessage-deflate')) {
-	      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions));
+	      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions, options));
 	    }
 	  }
 
@@ -25809,6 +26140,19 @@ function requireReceiver () {
 	    this.#loop = true;
 
 	    this.run(callback);
+	  }
+
+	  #validatePayloadLength () {
+	    if (
+	      this.#maxPayloadSize > 0 &&
+	      !isControlFrame(this.#info.opcode) &&
+	      this.#info.payloadLength + this.#fragmentsBytes > this.#maxPayloadSize
+	    ) {
+	      failWebsocketConnectionWithCode(this.ws, 1009, 'Payload size exceeds maximum allowed size');
+	      return false
+	    }
+
+	    return true
 	  }
 
 	  /**
@@ -25899,6 +26243,10 @@ function requireReceiver () {
 	        if (payloadLength <= 125) {
 	          this.#info.payloadLength = payloadLength;
 	          this.#state = parserStates.READ_DATA;
+
+	          if (!this.#validatePayloadLength()) {
+	            return
+	          }
 	        } else if (payloadLength === 126) {
 	          this.#state = parserStates.PAYLOADLENGTH_16;
 	        } else if (payloadLength === 127) {
@@ -25923,6 +26271,10 @@ function requireReceiver () {
 
 	        this.#info.payloadLength = buffer.readUInt16BE(0);
 	        this.#state = parserStates.READ_DATA;
+
+	        if (!this.#validatePayloadLength()) {
+	          return
+	        }
 	      } else if (this.#state === parserStates.PAYLOADLENGTH_64) {
 	        if (this.#byteOffset < 8) {
 	          return callback()
@@ -25930,6 +26282,7 @@ function requireReceiver () {
 
 	        const buffer = this.consume(8);
 	        const upper = buffer.readUInt32BE(0);
+	        const lower = buffer.readUInt32BE(4);
 
 	        // 2^31 is the maximum bytes an arraybuffer can contain
 	        // on 32-bit systems. Although, on 64-bit systems, this is
@@ -25937,15 +26290,17 @@ function requireReceiver () {
 	        // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Invalid_array_length
 	        // https://source.chromium.org/chromium/chromium/src/+/main:v8/src/common/globals.h;drc=1946212ac0100668f14eb9e2843bdd846e510a1e;bpv=1;bpt=1;l=1275
 	        // https://source.chromium.org/chromium/chromium/src/+/main:v8/src/objects/js-array-buffer.h;l=34;drc=1946212ac0100668f14eb9e2843bdd846e510a1e
-	        if (upper > 2 ** 31 - 1) {
+	        if (upper !== 0 || lower > 2 ** 31 - 1) {
 	          failWebsocketConnection(this.ws, 'Received payload length > 2^31 bytes.');
 	          return
 	        }
 
-	        const lower = buffer.readUInt32BE(4);
-
-	        this.#info.payloadLength = (upper << 8) + lower;
+	        this.#info.payloadLength = lower;
 	        this.#state = parserStates.READ_DATA;
+
+	        if (!this.#validatePayloadLength()) {
+	          return
+	        }
 	      } else if (this.#state === parserStates.READ_DATA) {
 	        if (this.#byteOffset < this.#info.payloadLength) {
 	          return callback()
@@ -25958,42 +26313,58 @@ function requireReceiver () {
 	          this.#state = parserStates.INFO;
 	        } else {
 	          if (!this.#info.compressed) {
-	            this.#fragments.push(body);
+	            if (!this.writeFragments(body)) {
+	              return
+	            }
+
+	            if (this.#maxPayloadSize > 0 && this.#fragmentsBytes > this.#maxPayloadSize) {
+	              failWebsocketConnectionWithCode(this.ws, 1009, new MessageSizeExceededError().message);
+	              return
+	            }
 
 	            // If the frame is not fragmented, a message has been received.
 	            // If the frame is fragmented, it will terminate with a fin bit set
 	            // and an opcode of 0 (continuation), therefore we handle that when
 	            // parsing continuation frames, not here.
 	            if (!this.#info.fragmented && this.#info.fin) {
-	              const fullMessage = Buffer.concat(this.#fragments);
-	              websocketMessageReceived(this.ws, this.#info.binaryType, fullMessage);
-	              this.#fragments.length = 0;
+	              websocketMessageReceived(this.ws, this.#info.binaryType, this.consumeFragments());
 	            }
 
 	            this.#state = parserStates.INFO;
 	          } else {
-	            this.#extensions.get('permessage-deflate').decompress(body, this.#info.fin, (error, data) => {
-	              if (error) {
-	                closeWebSocketConnection(this.ws, 1007, error.message, error.message.length);
-	                return
-	              }
+	            this.#extensions.get('permessage-deflate').decompress(
+	              body,
+	              this.#info.fin,
+	              (error, data) => {
+	                if (error) {
+	                  const code = error instanceof MessageSizeExceededError ? 1009 : 1007;
+	                  failWebsocketConnectionWithCode(this.ws, code, error.message);
+	                  return
+	                }
 
-	              this.#fragments.push(data);
+	                if (!this.writeFragments(data)) {
+	                  return
+	                }
 
-	              if (!this.#info.fin) {
-	                this.#state = parserStates.INFO;
+	                if (this.#maxPayloadSize > 0 && this.#fragmentsBytes > this.#maxPayloadSize) {
+	                  failWebsocketConnectionWithCode(this.ws, 1009, new MessageSizeExceededError().message);
+	                  return
+	                }
+
+	                if (!this.#info.fin) {
+	                  this.#state = parserStates.INFO;
+	                  this.#loop = true;
+	                  this.run(callback);
+	                  return
+	                }
+
+	                websocketMessageReceived(this.ws, this.#info.binaryType, this.consumeFragments());
+
 	                this.#loop = true;
+	                this.#state = parserStates.INFO;
 	                this.run(callback);
-	                return
 	              }
-
-	              websocketMessageReceived(this.ws, this.#info.binaryType, Buffer.concat(this.#fragments));
-
-	              this.#loop = true;
-	              this.#state = parserStates.INFO;
-	              this.#fragments.length = 0;
-	              this.run(callback);
-	            });
+	            );
 
 	            this.#loop = false;
 	            break
@@ -26043,6 +26414,35 @@ function requireReceiver () {
 	    this.#byteOffset -= n;
 
 	    return buffer
+	  }
+
+	  writeFragments (fragment) {
+	    if (
+	      this.#maxFragments > 0 &&
+	      this.#fragments.length === this.#maxFragments
+	    ) {
+	      failWebsocketConnectionWithCode(this.ws, 1008, 'Too many message fragments');
+	      return false
+	    }
+
+	    this.#fragmentsBytes += fragment.length;
+	    this.#fragments.push(fragment);
+	    return true
+	  }
+
+	  consumeFragments () {
+	    const fragments = this.#fragments;
+
+	    if (fragments.length === 1) {
+	      this.#fragmentsBytes = 0;
+	      return fragments.shift()
+	    }
+
+	    const output = Buffer.concat(fragments, this.#fragmentsBytes);
+	    this.#fragments = [];
+	    this.#fragmentsBytes = 0;
+
+	    return output
 	  }
 
 	  parseCloseBody (data) {
@@ -26726,11 +27126,18 @@ function requireWebsocket () {
 	   * @see https://websockets.spec.whatwg.org/#feedback-from-the-protocol
 	   */
 	  #onConnectionEstablished (response, parsedExtensions) {
-	    // processResponse is called when the "response’s header list has been received and initialized."
+	    // processResponse is called when the "response's header list has been received and initialized."
 	    // once this happens, the connection is open
 	    this[kResponse] = response;
 
-	    const parser = new ByteParser(this, parsedExtensions);
+	    const webSocketOptions = this[kController]?.dispatcher?.webSocketOptions;
+	    const maxFragments = webSocketOptions?.maxFragments;
+	    const maxPayloadSize = webSocketOptions?.maxPayloadSize;
+
+	    const parser = new ByteParser(this, parsedExtensions, {
+	      maxFragments,
+	      maxPayloadSize
+	    });
 	    parser.on('drain', onParserDrain);
 	    parser.on('error', onParserError.bind(this));
 
@@ -31562,28 +31969,6 @@ function requireInternalPatternHelper () {
 
 var internalPattern = {};
 
-var concatMap;
-var hasRequiredConcatMap;
-
-function requireConcatMap () {
-	if (hasRequiredConcatMap) return concatMap;
-	hasRequiredConcatMap = 1;
-	concatMap = function (xs, fn) {
-	    var res = [];
-	    for (var i = 0; i < xs.length; i++) {
-	        var x = fn(xs[i], i);
-	        if (isArray(x)) res.push.apply(res, x);
-	        else res.push(x);
-	    }
-	    return res;
-	};
-
-	var isArray = Array.isArray || function (xs) {
-	    return Object.prototype.toString.call(xs) === '[object Array]';
-	};
-	return concatMap;
-}
-
 var balancedMatch;
 var hasRequiredBalancedMatch;
 
@@ -31660,7 +32045,6 @@ var hasRequiredBraceExpansion;
 function requireBraceExpansion () {
 	if (hasRequiredBraceExpansion) return braceExpansion;
 	hasRequiredBraceExpansion = 1;
-	var concatMap = requireConcatMap();
 	var balanced = requireBalancedMatch();
 
 	braceExpansion = expandTop;
@@ -31670,6 +32054,20 @@ function requireBraceExpansion () {
 	var escClose = '\0CLOSE'+Math.random()+'\0';
 	var escComma = '\0COMMA'+Math.random()+'\0';
 	var escPeriod = '\0PERIOD'+Math.random()+'\0';
+
+	var EXPANSION_MAX = 100000;
+
+	// `EXPANSION_MAX` caps the *number* of expansions, but not their length. An
+	// input like `'{a,b}'.repeat(1500)` stays under that count - its output is
+	// truncated to 100k results - while making every result ~1500 characters
+	// long. The result set, and the intermediate arrays built while combining
+	// brace sets, then grow large enough to exhaust memory and crash the process
+	// (CVE-2026-14257). `EXPANSION_MAX_LENGTH` bounds the total number of
+	// characters the accumulator may hold at any point, so memory stays flat no
+	// matter how many brace groups are chained. The limit sits well above any
+	// realistic expansion (100k results hitting `EXPANSION_MAX` measure ~1M
+	// characters) so legitimate input is unaffected.
+	var EXPANSION_MAX_LENGTH = 4000000;
 
 	function numeric(str) {
 	  return parseInt(str, 10) == str
@@ -31724,9 +32122,13 @@ function requireBraceExpansion () {
 	  return parts;
 	}
 
-	function expandTop(str) {
+	function expandTop(str, options) {
 	  if (!str)
 	    return [];
+
+	  options = options || {};
+	  var max = options.max == null ? EXPANSION_MAX : options.max;
+	  var maxLength = options.maxLength == null ? EXPANSION_MAX_LENGTH : options.maxLength;
 
 	  // I don't know why Bash 4.3 does this, but it does.
 	  // Anything starting with {} will have the first two bytes preserved
@@ -31738,7 +32140,7 @@ function requireBraceExpansion () {
 	    str = '\\{\\}' + str.substr(2);
 	  }
 
-	  return expand(escapeBraces(str), true).map(unescapeBraces);
+	  return expand(escapeBraces(str), max, maxLength, true).map(unescapeBraces);
 	}
 
 	function embrace(str) {
@@ -31755,106 +32157,270 @@ function requireBraceExpansion () {
 	  return i >= y;
 	}
 
-	function expand(str, isTop) {
-	  var expansions = [];
-
-	  var m = balanced('{', '}', str);
-	  if (!m || /\$$/.test(m.pre)) return [str];
-
-	  var isNumericSequence = /^-?\d+\.\.-?\d+(?:\.\.-?\d+)?$/.test(m.body);
-	  var isAlphaSequence = /^[a-zA-Z]\.\.[a-zA-Z](?:\.\.-?\d+)?$/.test(m.body);
-	  var isSequence = isNumericSequence || isAlphaSequence;
-	  var isOptions = m.body.indexOf(',') >= 0;
-	  if (!isSequence && !isOptions) {
-	    // {a},b}
-	    if (m.post.match(/,.*\}/)) {
-	      str = m.pre + '{' + m.body + escClose + m.post;
-	      return expand(str);
+	// Build `{ acc[a] + pre + values[v] }` for every combination, capping the
+	// number of results at `max` and the total number of characters at `maxLength`.
+	// This is the one place output grows, so bounding it here keeps the single
+	// accumulator - and therefore memory - flat regardless of how many brace groups
+	// are combined (CVE-2026-14257).
+	//
+	// `base[a]` is the length of the part of `acc[a]` that predates the current
+	// empty-drop baseline (see `expand`). The matching baselines for the results
+	// are appended to `outBase`, which the caller carries forward alongside them.
+	function combine(
+	  acc,
+	  base,
+	  pre,
+	  values,
+	  max,
+	  maxLength,
+	  dropEmpties,
+	  outBase
+	) {
+	  var out = [];
+	  var length = 0;
+	  for (var a = 0; a < acc.length; a++) {
+	    for (var v = 0; v < values.length; v++) {
+	      if (out.length >= max) return out
+	      var expansion = acc[a] + pre + values[v];
+	      // Bash drops empty results at the top level. Skip them before they count
+	      // against `max`, so `max` bounds the number of *kept* results. "Empty"
+	      // means "adds nothing past the baseline", not "empty overall".
+	      if (dropEmpties && expansion.length === base[a]) continue
+	      if (length + expansion.length > maxLength) return out
+	      out.push(expansion);
+	      outBase.push(base[a]);
+	      length += expansion.length;
 	    }
-	    return [str];
 	  }
+	  return out
+	}
 
-	  var n;
-	  if (isSequence) {
-	    n = m.body.split(/\.\./);
-	  } else {
-	    n = parseCommaParts(m.body);
-	    if (n.length === 1) {
-	      // x{{a,b}}y ==> x{a}y x{b}y
-	      n = expand(n[0], false).map(embrace);
-	      if (n.length === 1) {
-	        var post = m.post.length
-	          ? expand(m.post, false)
-	          : [''];
-	        return post.map(function(p) {
-	          return m.pre + n[0] + p;
-	        });
+	// The expansion values of a single numeric (`1..5`) or alphabetic (`a..e..2`)
+	// sequence body.
+	function expandSequence(
+	  body,
+	  isAlphaSequence,
+	  max,
+	  maxLength
+	) {
+	  var n = body.split(/\.\./);
+	  var N = [];
+	  // A sequence body always splits into two or three parts, but the compiler
+	  // can't know that.
+	  /* c8 ignore start */
+	  if (n[0] === undefined || n[1] === undefined) {
+	    return N
+	  }
+	  /* c8 ignore stop */
+	  var x = numeric(n[0]);
+	  var y = numeric(n[1]);
+	  var width = Math.max(n[0].length, n[1].length);
+	  var incr =
+	    n.length === 3 && n[2] !== undefined ?
+	      Math.max(Math.abs(numeric(n[2])), 1)
+	    : 1;
+	  var test = lte;
+	  var reverse = y < x;
+	  if (reverse) {
+	    incr *= -1;
+	    test = gte;
+	  }
+	  var pad = n.some(isPadded);
+
+	  var length = 0;
+	  for (var i = x; test(i, y) && N.length < max; i += incr) {
+	    var c;
+	    if (isAlphaSequence) {
+	      c = String.fromCharCode(i);
+	      if (c === '\\') {
+	        c = '';
 	      }
-	    }
-	  }
-
-	  // at this point, n is the parts, and we know it's not a comma set
-	  // with a single entry.
-
-	  // no need to expand pre, since it is guaranteed to be free of brace-sets
-	  var pre = m.pre;
-	  var post = m.post.length
-	    ? expand(m.post, false)
-	    : [''];
-
-	  var N;
-
-	  if (isSequence) {
-	    var x = numeric(n[0]);
-	    var y = numeric(n[1]);
-	    var width = Math.max(n[0].length, n[1].length);
-	    var incr = n.length == 3
-	      ? Math.abs(numeric(n[2]))
-	      : 1;
-	    var test = lte;
-	    var reverse = y < x;
-	    if (reverse) {
-	      incr *= -1;
-	      test = gte;
-	    }
-	    var pad = n.some(isPadded);
-
-	    N = [];
-
-	    for (var i = x; test(i, y); i += incr) {
-	      var c;
-	      if (isAlphaSequence) {
-	        c = String.fromCharCode(i);
-	        if (c === '\\')
-	          c = '';
-	      } else {
-	        c = String(i);
-	        if (pad) {
-	          var need = width - c.length;
-	          if (need > 0) {
-	            var z = new Array(need + 1).join('0');
-	            if (i < 0)
-	              c = '-' + z + c.slice(1);
-	            else
-	              c = z + c;
+	    } else {
+	      c = String(i);
+	      if (pad) {
+	        var need = width - c.length;
+	        if (need > 0) {
+	          var z = new Array(need + 1).join('0');
+	          if (i < 0) {
+	            c = '-' + z + c.slice(1);
+	          } else {
+	            c = z + c;
 	          }
 	        }
 	      }
-	      N.push(c);
 	    }
-	  } else {
-	    N = concatMap(n, function(el) { return expand(el, false) });
+	    if (length + c.length > maxLength) break
+	    N.push(c);
+	    length += c.length;
+	  }
+	  return N
+	}
+
+	function expand(
+	  str,
+	  max,
+	  maxLength,
+	  isTop
+	) {
+	  // Consume the string's top-level brace groups left to right, threading a
+	  // running set of combined prefixes (`acc`). Expanding the tail iteratively -
+	  // rather than recursing on `m.post` once per group - keeps the native stack
+	  // depth constant, so deeply chained input (`'{a,b}'.repeat(3000)`) can no
+	  // longer overflow the stack, and leaves a single accumulator whose size
+	  // `maxLength` bounds directly (CVE-2026-14257).
+	  var acc = [''];
+
+	  // Bash drops empty results, but only when the *first* group of the run is a
+	  // comma set - a sequence like `{a..\}` may legitimately yield ''. The drop
+	  // is on the final strings, so it is applied to whichever `combine` produces
+	  // them (the one with no brace set left in the tail).
+	  //
+	  // The old implementation recursed on `m.post`, so the drop tested only the
+	  // expansion of the current call's substring. The `{a},b}` rewrite below turns
+	  // `isTop` back on part-way through a string, starting a fresh such run, so
+	  // the drop must ignore whatever `acc` already holds from earlier groups.
+	  // `accBase[a]` records how much of `acc[a]` predates the current run;
+	  // `combine` treats an expansion as empty when it adds nothing past that.
+	  var accBase = [0];
+	  var dropEmpties = false;
+	  var firstGroup = true;
+	  var nextBase;
+
+	  for (;;) {
+	    var m = balanced('{', '}', str);
+
+	    // No brace set left: the rest of the string is literal.
+	    if (!m) {
+	      return combine(acc, accBase, str, [''], max, maxLength, dropEmpties, [])
+	    }
+
+	    // no need to expand pre, since it is guaranteed to be free of brace-sets
+	    var pre = m.pre;
+
+	    // For compatibility reasons, `${` is not eligible for brace expansion, and
+	    // on the 1.x line it suppresses expansion of the rest of the string too:
+	    // the whole remainder is literal. The 2.x and 5.x lines instead keep
+	    // expanding the tail, which is what bash does, but changing that here would
+	    // be a breaking change for 1.x consumers. Routed through `combine` so the
+	    // result is still bounded by `max` and `maxLength`.
+	    if (/\$$/.test(pre)) {
+	      return combine(acc, accBase, str, [''], max, maxLength, dropEmpties, [])
+	    }
+
+	    var isNumericSequence = /^-?\d+\.\.-?\d+(?:\.\.-?\d+)?$/.test(m.body);
+	    var isAlphaSequence = /^[a-zA-Z]\.\.[a-zA-Z](?:\.\.-?\d+)?$/.test(m.body);
+	    var isSequence = isNumericSequence || isAlphaSequence;
+	    var isOptions = m.body.indexOf(',') >= 0;
+	    if (!isSequence && !isOptions) {
+	      // {a},b}
+	      if (m.post.match(/,(?!,).*\}/)) {
+	        str = m.pre + '{' + m.body + escClose + m.post;
+	        // The rewritten string is expanded as if it were a fresh top-level one,
+	        // so start a new empty-drop run: anchor the baseline at what `acc`
+	        // holds now, and let the next expanding group decide whether to drop.
+	        isTop = true;
+	        firstGroup = true;
+	        dropEmpties = false;
+	        accBase = [];
+	        for (var b = 0; b < acc.length; b++) {
+	          accBase.push(acc[b].length);
+	        }
+	        continue
+	      }
+	      // Nothing here expands, so the whole remaining string is literal.
+	      return combine(
+	        acc,
+	        accBase,
+	        pre + '{' + m.body + '}' + m.post,
+	        [''],
+	        max,
+	        maxLength,
+	        dropEmpties,
+	        []
+	      )
+	    }
+
+	    if (firstGroup) {
+	      dropEmpties = isTop && !isSequence;
+	      firstGroup = false;
+	    }
+
+	    var values;
+	    if (isSequence) {
+	      values = expandSequence(m.body, isAlphaSequence, max, maxLength);
+	    } else {
+	      var n = parseCommaParts(m.body);
+	      if (n.length === 1 && n[0] !== undefined) {
+	        // x{{a,b}}y ==> x{a}y x{b}y
+	        n = expand(n[0], max, maxLength, false).map(embrace);
+	        //XXX is this necessary? Can't seem to hit it in tests.
+	        /* c8 ignore start */
+	        if (n.length === 1) {
+	          nextBase = [];
+	          acc = combine(
+	            acc,
+	            accBase,
+	            pre + n[0],
+	            [''],
+	            max,
+	            maxLength,
+	            dropEmpties && !m.post.length,
+	            nextBase
+	          );
+	          accBase = nextBase;
+	          if (!m.post.length) break
+	          str = m.post;
+	          continue
+	        }
+	        /* c8 ignore stop */
+	      }
+
+	      // Values that `combine` is going to drop as empty produce no result, so
+	      // they must not count against `max` - otherwise `{a,,b}` with `max: 2`
+	      // would stop at `['a', '']` and yield one result instead of two. Skipping
+	      // them outright keeps `values` bounded while leaving `max` a bound on
+	      // *kept* results. A value is dropped when it adds nothing past the
+	      // baseline, which is what `combine` tests.
+	      var dropsEmpties = dropEmpties && !m.post.length && !pre;
+	      for (var d = 0; dropsEmpties && d < acc.length; d++) {
+	        if (acc[d].length !== accBase[d]) {
+	          dropsEmpties = false;
+	        }
+	      }
+
+	      values = [];
+	      var valuesLength = 0;
+	      outer: for (var j = 0; j < n.length; j++) {
+	        var expanded = expand(n[j], max, maxLength, false);
+	        for (var k = 0; k < expanded.length; k++) {
+	          var v = expanded[k];
+	          if (dropsEmpties && !v) continue
+	          if (values.length >= max || valuesLength + v.length > maxLength) {
+	            break outer
+	          }
+	          values.push(v);
+	          valuesLength += v.length;
+	        }
+	      }
+	    }
+
+	    nextBase = [];
+	    acc = combine(
+	      acc,
+	      accBase,
+	      pre,
+	      values,
+	      max,
+	      maxLength,
+	      dropEmpties && !m.post.length,
+	      nextBase
+	    );
+	    accBase = nextBase;
+	    if (!m.post.length) break
+	    str = m.post;
 	  }
 
-	  for (var j = 0; j < N.length; j++) {
-	    for (var k = 0; k < post.length; k++) {
-	      var expansion = pre + N[j] + post[k];
-	      if (!isTop || isSequence || expansion)
-	        expansions.push(expansion);
-	    }
-	  }
-
-	  return expansions;
+	  return acc
 	}
 	return braceExpansion;
 }
@@ -32009,6 +32575,8 @@ function requireMinimatch () {
 	  }
 
 	  this.options = options;
+	  this.maxGlobstarRecursion = options.maxGlobstarRecursion !== undefined
+	    ? options.maxGlobstarRecursion : 200;
 	  this.set = [];
 	  this.pattern = pattern;
 	  this.regexp = null;
@@ -32256,6 +32824,9 @@ function requireMinimatch () {
 	          re += c;
 	          continue
 	        }
+
+	        // coalesce consecutive non-globstar * characters
+	        if (c === '*' && stateChar === '*') continue
 
 	        // if we already have a stateChar, then it means
 	        // that there was something like ** or +? in there.
@@ -32651,19 +33222,163 @@ function requireMinimatch () {
 	// out of pattern, then that's fine, as long as all
 	// the parts match.
 	Minimatch.prototype.matchOne = function (file, pattern, partial) {
-	  var options = this.options;
+	  if (pattern.indexOf(GLOBSTAR) !== -1) {
+	    return this._matchGlobstar(file, pattern, partial, 0, 0)
+	  }
+	  return this._matchOne(file, pattern, partial, 0, 0)
+	};
 
-	  this.debug('matchOne',
-	    { 'this': this, file: file, pattern: pattern });
+	Minimatch.prototype._matchGlobstar = function (file, pattern, partial, fileIndex, patternIndex) {
+	  var i;
 
-	  this.debug('matchOne', file.length, pattern.length);
+	  // find first globstar from patternIndex
+	  var firstgs = -1;
+	  for (i = patternIndex; i < pattern.length; i++) {
+	    if (pattern[i] === GLOBSTAR) { firstgs = i; break }
+	  }
 
-	  for (var fi = 0,
-	      pi = 0,
-	      fl = file.length,
-	      pl = pattern.length
-	      ; (fi < fl) && (pi < pl)
-	      ; fi++, pi++) {
+	  // find last globstar
+	  var lastgs = -1;
+	  for (i = pattern.length - 1; i >= 0; i--) {
+	    if (pattern[i] === GLOBSTAR) { lastgs = i; break }
+	  }
+
+	  var head = pattern.slice(patternIndex, firstgs);
+	  var body = partial ? pattern.slice(firstgs + 1) : pattern.slice(firstgs + 1, lastgs);
+	  var tail = partial ? [] : pattern.slice(lastgs + 1);
+
+	  // check the head
+	  if (head.length) {
+	    var fileHead = file.slice(fileIndex, fileIndex + head.length);
+	    if (!this._matchOne(fileHead, head, partial, 0, 0)) {
+	      return false
+	    }
+	    fileIndex += head.length;
+	  }
+
+	  // check the tail
+	  var fileTailMatch = 0;
+	  if (tail.length) {
+	    if (tail.length + fileIndex > file.length) return false
+
+	    var tailStart = file.length - tail.length;
+	    if (this._matchOne(file, tail, partial, tailStart, 0)) {
+	      fileTailMatch = tail.length;
+	    } else {
+	      // affordance for stuff like a/**/* matching a/b/
+	      if (file[file.length - 1] !== '' ||
+	          fileIndex + tail.length === file.length) {
+	        return false
+	      }
+	      tailStart--;
+	      if (!this._matchOne(file, tail, partial, tailStart, 0)) {
+	        return false
+	      }
+	      fileTailMatch = tail.length + 1;
+	    }
+	  }
+
+	  // if body is empty (single ** between head and tail)
+	  if (!body.length) {
+	    var sawSome = !!fileTailMatch;
+	    for (i = fileIndex; i < file.length - fileTailMatch; i++) {
+	      var f = String(file[i]);
+	      sawSome = true;
+	      if (f === '.' || f === '..' ||
+	          (!this.options.dot && f.charAt(0) === '.')) {
+	        return false
+	      }
+	    }
+	    return partial || sawSome
+	  }
+
+	  // split body into segments at each GLOBSTAR
+	  var bodySegments = [[[], 0]];
+	  var currentBody = bodySegments[0];
+	  var nonGsParts = 0;
+	  var nonGsPartsSums = [0];
+	  for (var bi = 0; bi < body.length; bi++) {
+	    var b = body[bi];
+	    if (b === GLOBSTAR) {
+	      nonGsPartsSums.push(nonGsParts);
+	      currentBody = [[], 0];
+	      bodySegments.push(currentBody);
+	    } else {
+	      currentBody[0].push(b);
+	      nonGsParts++;
+	    }
+	  }
+
+	  var idx = bodySegments.length - 1;
+	  var fileLength = file.length - fileTailMatch;
+	  for (var si = 0; si < bodySegments.length; si++) {
+	    bodySegments[si][1] = fileLength -
+	      (nonGsPartsSums[idx--] + bodySegments[si][0].length);
+	  }
+
+	  return !!this._matchGlobStarBodySections(
+	    file, bodySegments, fileIndex, 0, partial, 0, !!fileTailMatch
+	  )
+	};
+
+	// return false for "nope, not matching"
+	// return null for "not matching, cannot keep trying"
+	Minimatch.prototype._matchGlobStarBodySections = function (
+	  file, bodySegments, fileIndex, bodyIndex, partial, globStarDepth, sawTail
+	) {
+	  var bs = bodySegments[bodyIndex];
+	  if (!bs) {
+	    // just make sure there are no bad dots
+	    for (var i = fileIndex; i < file.length; i++) {
+	      sawTail = true;
+	      var f = file[i];
+	      if (f === '.' || f === '..' ||
+	          (!this.options.dot && f.charAt(0) === '.')) {
+	        return false
+	      }
+	    }
+	    return sawTail
+	  }
+
+	  var body = bs[0];
+	  var after = bs[1];
+	  while (fileIndex <= after) {
+	    var m = this._matchOne(
+	      file.slice(0, fileIndex + body.length),
+	      body,
+	      partial,
+	      fileIndex,
+	      0
+	    );
+	    // if limit exceeded, no match. intentional false negative,
+	    // acceptable break in correctness for security.
+	    if (m && globStarDepth < this.maxGlobstarRecursion) {
+	      var sub = this._matchGlobStarBodySections(
+	        file, bodySegments,
+	        fileIndex + body.length, bodyIndex + 1,
+	        partial, globStarDepth + 1, sawTail
+	      );
+	      if (sub !== false) {
+	        return sub
+	      }
+	    }
+	    var f = file[fileIndex];
+	    if (f === '.' || f === '..' ||
+	        (!this.options.dot && f.charAt(0) === '.')) {
+	      return false
+	    }
+	    fileIndex++;
+	  }
+	  return partial || null
+	};
+
+	Minimatch.prototype._matchOne = function (file, pattern, partial, fileIndex, patternIndex) {
+	  var fi, pi, fl, pl;
+	  for (
+	    fi = fileIndex, pi = patternIndex, fl = file.length, pl = pattern.length
+	    ; (fi < fl) && (pi < pl)
+	    ; fi++, pi++
+	  ) {
 	    this.debug('matchOne loop');
 	    var p = pattern[pi];
 	    var f = file[fi];
@@ -32673,87 +33388,7 @@ function requireMinimatch () {
 	    // should be impossible.
 	    // some invalid regexp stuff in the set.
 	    /* istanbul ignore if */
-	    if (p === false) return false
-
-	    if (p === GLOBSTAR) {
-	      this.debug('GLOBSTAR', [pattern, p, f]);
-
-	      // "**"
-	      // a/**/b/**/c would match the following:
-	      // a/b/x/y/z/c
-	      // a/x/y/z/b/c
-	      // a/b/x/b/x/c
-	      // a/b/c
-	      // To do this, take the rest of the pattern after
-	      // the **, and see if it would match the file remainder.
-	      // If so, return success.
-	      // If not, the ** "swallows" a segment, and try again.
-	      // This is recursively awful.
-	      //
-	      // a/**/b/**/c matching a/b/x/y/z/c
-	      // - a matches a
-	      // - doublestar
-	      //   - matchOne(b/x/y/z/c, b/**/c)
-	      //     - b matches b
-	      //     - doublestar
-	      //       - matchOne(x/y/z/c, c) -> no
-	      //       - matchOne(y/z/c, c) -> no
-	      //       - matchOne(z/c, c) -> no
-	      //       - matchOne(c, c) yes, hit
-	      var fr = fi;
-	      var pr = pi + 1;
-	      if (pr === pl) {
-	        this.debug('** at the end');
-	        // a ** at the end will just swallow the rest.
-	        // We have found a match.
-	        // however, it will not swallow /.x, unless
-	        // options.dot is set.
-	        // . and .. are *never* matched by **, for explosively
-	        // exponential reasons.
-	        for (; fi < fl; fi++) {
-	          if (file[fi] === '.' || file[fi] === '..' ||
-	            (!options.dot && file[fi].charAt(0) === '.')) return false
-	        }
-	        return true
-	      }
-
-	      // ok, let's see if we can swallow whatever we can.
-	      while (fr < fl) {
-	        var swallowee = file[fr];
-
-	        this.debug('\nglobstar while', file, fr, pattern, pr, swallowee);
-
-	        // XXX remove this slice.  Just pass the start index.
-	        if (this.matchOne(file.slice(fr), pattern.slice(pr), partial)) {
-	          this.debug('globstar found match!', fr, fl, swallowee);
-	          // found a match.
-	          return true
-	        } else {
-	          // can't swallow "." or ".." ever.
-	          // can only swallow ".foo" when explicitly asked.
-	          if (swallowee === '.' || swallowee === '..' ||
-	            (!options.dot && swallowee.charAt(0) === '.')) {
-	            this.debug('dot detected!', file, fr, pattern, pr);
-	            break
-	          }
-
-	          // ** swallows a segment, and continue.
-	          this.debug('globstar swallow a segment, and continue');
-	          fr++;
-	        }
-	      }
-
-	      // no match was found.
-	      // However, in partial mode, we can't say this is necessarily over.
-	      // If there's more *pattern* left, then
-	      /* istanbul ignore if */
-	      if (partial) {
-	        // ran out of file
-	        this.debug('\n>>> no match, partial?', file, fr, pattern, pr);
-	        if (fr === fl) return true
-	      }
-	      return false
-	    }
+	    if (p === false || p === GLOBSTAR) return false
 
 	    // something other than **
 	    // non-magic patterns just have to match exactly
@@ -32769,17 +33404,6 @@ function requireMinimatch () {
 
 	    if (!hit) return false
 	  }
-
-	  // Note: ending in / means that we'll get a final ""
-	  // at the end of the pattern.  This can only match a
-	  // corresponding "" at the end of the file.
-	  // If the file ends in /, then it can only match a
-	  // a pattern that ends in /, unless the pattern just
-	  // doesn't have any more for it. But, a/b/ should *not*
-	  // match "a/b/*", even though "" matches against the
-	  // [^/]*? pattern, except in partial mode, where it might
-	  // simply not be reached yet.
-	  // However, a/b/ should still satisfy a/*
 
 	  // now either we fell off the end of the pattern, or we're done.
 	  if (fi === fl && pi === pl) {
@@ -33699,7 +34323,7 @@ function defaultVersion(schema) {
     return TEI_VERSION;
 }
 async function resolveFiles(files) {
-    let paths = [];
+    let paths;
     if (files.match(/\*/)) {
         const globber = await glob.create(files.split(/\s+/).join('\n'));
         paths = (await globber.glob()).map((p) => trimFilePath(p));
@@ -33945,11 +34569,22 @@ function requireConventions () {
 		XMLNS: 'http://www.w3.org/2000/xmlns/',
 	});
 
+	//[4]   	NameStartChar	   ::=   	":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#x2FF] | [#x370-#x37D] | [#x37F-#x1FFF] | [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF] | [#x3001-#xD7FF] | [#xF900-#xFDCF] | [#xFDF0-#xFFFD] | [#x10000-#xEFFFF]
+	//[4a]   	NameChar	   ::=   	NameStartChar | "-" | "." | [0-9] | #xB7 | [#x0300-#x036F] | [#x203F-#x2040]
+	//[5]   	Name	   ::=   	NameStartChar (NameChar)*
+	var nameStartChar = /[A-Z_a-z\xC0-\xD6\xD8-\xF6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]/;//\u10000-\uEFFFF
+	var nameChar = new RegExp("[\\-\\.0-9"+nameStartChar.source.slice(1,-1)+"\\u00B7\\u0300-\\u036F\\u203F-\\u2040]");
+	var tagNamePattern = new RegExp('^'+nameStartChar.source+nameChar.source+'*(?:\:'+nameStartChar.source+nameChar.source+'*)?$');
+	//var tagNamePattern = /^[a-zA-Z_][\w\-\.]*(?:\:[a-zA-Z_][\w\-\.]*)?$/
+
 	conventions.assign = assign;
 	conventions.find = find;
 	conventions.freeze = freeze;
 	conventions.MIME_TYPE = MIME_TYPE;
 	conventions.NAMESPACE = NAMESPACE;
+	conventions.nameStartChar = nameStartChar;
+	conventions.nameChar = nameChar;
+	conventions.tagNamePattern = tagNamePattern;
 	return conventions;
 }
 
@@ -33962,6 +34597,7 @@ function requireDom () {
 
 	var find = conventions.find;
 	var NAMESPACE = conventions.NAMESPACE;
+	var tagNamePattern = conventions.tagNamePattern;
 
 	/**
 	 * A prerequisite for `[].filter`, to drop elements that are empty
@@ -34071,14 +34707,14 @@ function requireDom () {
 	ExceptionCode.DOMSTRING_SIZE_ERR          = ((ExceptionMessage[2]="DOMString size error"),2);
 	var HIERARCHY_REQUEST_ERR       = ExceptionCode.HIERARCHY_REQUEST_ERR       = ((ExceptionMessage[3]="Hierarchy request error"),3);
 	ExceptionCode.WRONG_DOCUMENT_ERR          = ((ExceptionMessage[4]="Wrong document"),4);
-	ExceptionCode.INVALID_CHARACTER_ERR       = ((ExceptionMessage[5]="Invalid character"),5);
+	var INVALID_CHARACTER_ERR       = ExceptionCode.INVALID_CHARACTER_ERR       = ((ExceptionMessage[5]="Invalid character"),5);
 	ExceptionCode.NO_DATA_ALLOWED_ERR         = ((ExceptionMessage[6]="No data allowed"),6);
 	ExceptionCode.NO_MODIFICATION_ALLOWED_ERR = ((ExceptionMessage[7]="No modification allowed"),7);
 	var NOT_FOUND_ERR               = ExceptionCode.NOT_FOUND_ERR               = ((ExceptionMessage[8]="Not found"),8);
 	ExceptionCode.NOT_SUPPORTED_ERR           = ((ExceptionMessage[9]="Not supported"),9);
 	var INUSE_ATTRIBUTE_ERR         = ExceptionCode.INUSE_ATTRIBUTE_ERR         = ((ExceptionMessage[10]="Attribute in use"),10);
 	//level2
-	ExceptionCode.INVALID_STATE_ERR        	= ((ExceptionMessage[11]="Invalid state"),11);
+	var INVALID_STATE_ERR        	= ExceptionCode.INVALID_STATE_ERR        	= ((ExceptionMessage[11]="Invalid state"),11);
 	ExceptionCode.SYNTAX_ERR               	= ((ExceptionMessage[12]="Syntax error"),12);
 	ExceptionCode.INVALID_MODIFICATION_ERR 	= ((ExceptionMessage[13]="Invalid modification"),13);
 	ExceptionCode.NAMESPACE_ERR           	= ((ExceptionMessage[14]="Invalid namespace"),14);
@@ -34128,9 +34764,10 @@ function requireDom () {
 		item: function(index) {
 			return index >= 0 && index < this.length ? this[index] : null;
 		},
-		toString:function(isHTML,nodeFilter){
+		toString:function(isHTML,nodeFilter,options){
+			var requireWellFormed = !!options && !!options.requireWellFormed;
 			for(var buf = [], i = 0;i<this.length;i++){
-				serializeToString(this[i],buf,isHTML,nodeFilter);
+				serializeToString(this[i],buf,isHTML,nodeFilter,null,requireWellFormed);
 			}
 			return buf.join('');
 		},
@@ -34375,13 +35012,28 @@ function requireDom () {
 		/**
 		 * Returns a doctype, with the given `qualifiedName`, `publicId`, and `systemId`.
 		 *
-		 * __This behavior is slightly different from the in the specs__:
+		 * __This implementation differs from the specification:__
 		 * - this implementation is not validating names or qualified names
 		 *   (when parsing XML strings, the SAX parser takes care of that)
 		 *
+		 * Note: `internalSubset` can only be introduced via a direct property write to `node.internalSubset` after creation.
+		 * Creation-time validation of `publicId`, `systemId` is not enforced.
+		 * The serializer-level check covers all mutation vectors, including direct property writes.
+		 * `internalSubset` is only serialized as `[ ... ]` when both `publicId` and `systemId` are
+		 * absent (empty or `'.'`) — if either external identifier is present, `internalSubset` is
+		 * silently omitted from the serialized output.
+		 *
 		 * @param {string} qualifiedName
 		 * @param {string} [publicId]
+		 * The external subset public identifier. Stored verbatim including surrounding quotes.
+		 * When serialized with `requireWellFormed: true` (via the 4th-parameter options object),
+		 * throws `DOMException` with code `INVALID_STATE_ERR` if the value is non-empty and does
+		 * not match the XML `PubidLiteral` production (W3C DOM Parsing §3.2.1.3; XML 1.0 [12]).
 		 * @param {string} [systemId]
+		 * The external subset system identifier. Stored verbatim including surrounding quotes.
+		 * When serialized with `requireWellFormed: true`, throws `DOMException` with code
+		 * `INVALID_STATE_ERR` if the value is non-empty and does not match the XML `SystemLiteral`
+		 * production (W3C DOM Parsing §3.2.1.3; XML 1.0 [11]).
 		 * @returns {DocumentType} which can either be used with `DOMImplementation.createDocument` upon document creation
 		 * 				  or can be put into the document via methods like `Node.insertBefore()` or `Node.replaceChild()`
 		 *
@@ -34447,18 +35099,44 @@ function requireDom () {
 			return cloneNode(this.ownerDocument||this,this,deep);
 		},
 		// Modified in DOM Level 2:
-		normalize:function(){
-			var child = this.firstChild;
-			while(child){
-				var next = child.nextSibling;
-				if(next && next.nodeType == TEXT_NODE && child.nodeType == TEXT_NODE){
-					this.removeChild(next);
-					child.appendData(next.data);
-				}else {
-					child.normalize();
-					child = next;
-				}
-			}
+		/**
+		 * Puts the specified node and all of its subtree into a "normalized" form. In a normalized
+		 * subtree, no text nodes in the subtree are empty and there are no adjacent text nodes.
+		 *
+		 * Specifically, this method merges any adjacent text nodes (i.e., nodes for which `nodeType`
+		 * is `TEXT_NODE`) into a single node with the combined data. It also removes any empty text
+		 * nodes.
+		 *
+		 * This method iteratively traverses all child nodes to normalize all descendant nodes within
+		 * the subtree.
+		 *
+		 * @throws {DOMException}
+		 * May throw a DOMException if operations within removeChild or appendData (which are
+		 * potentially invoked in this method) do not meet their specific constraints.
+		 * @see {@link Node.removeChild}
+		 * @see {@link CharacterData.appendData}
+		 * @see ../docs/walk-dom.md.
+		 */
+		normalize: function () {
+			walkDOM(this, null, {
+				enter: function (node) {
+					// Merge adjacent text children of node before walkDOM schedules them.
+					// walkDOM reads lastChild/previousSibling after enter returns, so the
+					// surviving post-merge children are what it descends into.
+					var child = node.firstChild;
+					while (child) {
+						var next = child.nextSibling;
+						if (next !== null && next.nodeType === TEXT_NODE && child.nodeType === TEXT_NODE) {
+							node.removeChild(next);
+							child.appendData(next.data);
+							// Do not advance child: re-check new nextSibling for another text run
+						} else {
+							child = next;
+						}
+					}
+					return true; // descend into surviving children
+				},
+			});
 		},
 	  	// Introduced in DOM Level 2:
 		isSupported:function(feature, version){
@@ -34534,21 +35212,103 @@ function requireDom () {
 	copy(NodeType,Node.prototype);
 
 	/**
-	 * @param callback return true for continue,false for break
-	 * @return boolean true: break visit;
+	 * @param {Node} node
+	 * Root of the subtree to visit.
+	 * @param {function(Node): boolean} callback
+	 * Called for each node in depth-first pre-order. Return a truthy value to stop traversal early.
+	 * @return {boolean} `true` if traversal was aborted by the callback, `false` otherwise.
 	 */
-	function _visitNode(node,callback){
-		if(callback(node)){
-			return true;
-		}
-		if(node = node.firstChild){
-			do{
-				if(_visitNode(node,callback)){return true}
-	        }while(node=node.nextSibling)
-	    }
+	function _visitNode(node, callback) {
+		return walkDOM(node, null, { enter: function (n) { return callback(n) ? walkDOM.STOP : true; } }) === walkDOM.STOP;
 	}
 
+	/**
+	 * Depth-first pre/post-order DOM tree walker.
+	 *
+	 * Visits every node in the subtree rooted at `node`. For each node:
+	 *
+	 * 1. Calls `callbacks.enter(node, context)` before descending into the node's children. The
+	 * return value becomes the `context` passed to each child's `enter` call and to the matching
+	 * `exit` call.
+	 * 2. If `enter` returns `null` or `undefined`, the node's children are skipped;
+	 * sibling traversal continues normally.
+	 * 3. If `enter` returns `walkDOM.STOP`, the entire traversal is aborted immediately — no
+	 * further `enter` or `exit` calls are made.
+	 * 4. `lastChild` and `previousSibling` are read **after** `enter` returns, so `enter` may
+	 * safely modify the node's own child list before the walker descends. Modifying siblings of
+	 * the current node or any other part of the tree produces unpredictable results: nodes already
+	 * queued on the stack are visited regardless of DOM changes, and newly inserted nodes outside
+	 * the current child list are never visited.
+	 * 5. Calls `callbacks.exit(node, context)` (if provided) after all of a node's children have
+	 * been visited, passing the same `context` that `enter`
+	 * returned for that node.
+	 *
+	 * This implementation uses an explicit stack and does not recurse — it is safe on arbitrarily
+	 * deep trees.
+	 *
+	 * @param {Node} node
+	 * Root of the subtree to walk.
+	 * @param {*} context
+	 * Initial context value passed to the root node's `enter`.
+	 * @param {{ enter: function(Node, *): *, exit?: function(Node, *): void }} callbacks
+	 * @returns {void | walkDOM.STOP}
+	 * @see ../docs/walk-dom.md.
+	 */
+	function walkDOM(node, context, callbacks) {
+		// Each stack frame is {node, context, phase}:
+		//   walkDOM.ENTER — call enter, then push children
+		//   walkDOM.EXIT  — call exit
+		var stack = [{ node: node, context: context, phase: walkDOM.ENTER }];
+		while (stack.length > 0) {
+			var frame = stack.pop();
+			if (frame.phase === walkDOM.ENTER) {
+				var childContext = callbacks.enter(frame.node, frame.context);
+				if (childContext === walkDOM.STOP) {
+					return walkDOM.STOP;
+				}
+				// Push exit frame before children so it fires after all children are processed (Last In First Out)
+				stack.push({ node: frame.node, context: childContext, phase: walkDOM.EXIT });
+				if (childContext === null || childContext === undefined) {
+					continue; // skip children
+				}
+				// lastChild is read after enter returns, so enter may modify the child list.
+				var child = frame.node.lastChild;
+				// Traverse from lastChild backwards so that pushing onto the stack
+				// naturally yields firstChild on top (processed first).
+				while (child) {
+					stack.push({ node: child, context: childContext, phase: walkDOM.ENTER });
+					child = child.previousSibling;
+				}
+			} else {
+				// frame.phase === walkDOM.EXIT
+				if (callbacks.exit) {
+					callbacks.exit(frame.node, frame.context);
+				}
+			}
+		}
+	}
 
+	/**
+	 * Sentinel value returned from a `walkDOM` `enter` callback to abort the entire traversal
+	 * immediately.
+	 *
+	 * @type {symbol}
+	 */
+	walkDOM.STOP = Symbol('walkDOM.STOP');
+	/**
+	 * Phase constant for a stack frame that has not yet been visited.
+	 * The `enter` callback is called and children are scheduled.
+	 *
+	 * @type {number}
+	 */
+	walkDOM.ENTER = 0;
+	/**
+	 * Phase constant for a stack frame whose subtree has been fully visited.
+	 * The `exit` callback is called.
+	 *
+	 * @type {number}
+	 */
+	walkDOM.EXIT = 1;
 
 	function Document(){
 		this.ownerDocument = this;
@@ -35152,12 +35912,44 @@ function requireDom () {
 			node.appendData(data);
 			return node;
 		},
+		/**
+		 * Returns a new CDATASection node whose data is `data`.
+		 *
+		 * __This implementation differs from the specification:__
+		 * - calling this method on an HTML document does not throw `NotSupportedError`.
+		 *
+		 * @param {string} data
+		 * @returns {CDATASection}
+		 * @throws DOMException with code `INVALID_CHARACTER_ERR` if `data` contains `"]]>"`.
+		 * @see https://developer.mozilla.org/en-US/docs/Web/API/Document/createCDATASection
+		 * @see https://dom.spec.whatwg.org/#dom-document-createcdatasection
+		 */
 		createCDATASection :	function(data){
+			if (data.indexOf(']]>') !== -1) {
+				throw new DOMException(INVALID_CHARACTER_ERR, 'data contains "]]>"');
+			}
 			var node = new CDATASection();
 			node.ownerDocument = this;
 			node.appendData(data);
 			return node;
 		},
+		/**
+		 * Returns a ProcessingInstruction node whose target is target and data is data.
+		 *
+		 * __This implementation differs from the specification:__
+		 * - it does not do any input validation on the arguments and doesn't throw "InvalidCharacterError".
+		 *
+		 * Note: When the resulting document is serialized with `requireWellFormed: true`, the
+		 * serializer throws with code `INVALID_STATE_ERR` if `.data` contains `?>` (W3C DOM Parsing
+		 * §3.2.1.7). Without that option the data is emitted verbatim.
+		 *
+		 * @param {string} target
+		 * @param {string} data
+		 * @returns {ProcessingInstruction}
+		 * @see https://developer.mozilla.org/docs/Web/API/Document/createProcessingInstruction
+		 * @see https://dom.spec.whatwg.org/#dom-document-createprocessinginstruction
+		 * @see https://www.w3.org/TR/DOM-Parsing/#dfn-concept-serialize-xml §3.2.1.7
+		 */
 		createProcessingInstruction :	function(target,data){
 			var node = new ProcessingInstruction();
 			node.ownerDocument = this;
@@ -35383,6 +36175,19 @@ function requireDom () {
 	_extends(CDATASection,CharacterData);
 
 
+	/**
+	 * Represents a DocumentType node (the `<!DOCTYPE ...>` declaration).
+	 *
+	 * `publicId`, `systemId`, and `internalSubset` are plain own-property assignments.
+	 * xmldom does not enforce the `readonly` constraint declared by the WHATWG DOM spec —
+	 * direct property writes succeed silently. Values are serialized verbatim when
+	 * `requireWellFormed` is false (the default). When the serializer is invoked with
+	 * `requireWellFormed: true` (via the 4th-parameter options object), it validates each
+	 * field and throws `DOMException` with code `INVALID_STATE_ERR` on invalid values.
+	 *
+	 * @class
+	 * @see https://developer.mozilla.org/en-US/docs/Web/API/DocumentType MDN
+	 */
 	function DocumentType() {
 	}	DocumentType.prototype.nodeType = DOCUMENT_TYPE_NODE;
 	_extends(DocumentType,Node);
@@ -35410,11 +36215,51 @@ function requireDom () {
 	ProcessingInstruction.prototype.nodeType = PROCESSING_INSTRUCTION_NODE;
 	_extends(ProcessingInstruction,Node);
 	function XMLSerializer(){}
-	XMLSerializer.prototype.serializeToString = function(node,isHtml,nodeFilter){
-		return nodeSerializeToString.call(node,isHtml,nodeFilter);
+	/**
+	 * Returns the result of serializing `node` to XML.
+	 *
+	 * When `options.requireWellFormed` is `true`, the serializer throws for content that would
+	 * produce ill-formed XML.
+	 *
+	 * __This implementation differs from the specification:__
+	 * - CDATASection nodes whose data contains `]]>` are serialized by splitting the section
+	 *   at each `]]>` occurrence (following W3C DOM Level 3 Core `split-cdata-sections`
+	 *   default behaviour) unless `requireWellFormed` is `true`.
+	 * - when `requireWellFormed` is `true`, `DOMException` with code `INVALID_STATE_ERR`
+	 *   is only thrown to prevent injection vectors, not for all the spec mandated checks.
+	 *
+	 * @param {Node} node
+	 * @param {boolean} [isHtml]
+	 * @param {function} [nodeFilter]
+	 * @param {Object} [options]
+	 * @param {boolean} [options.requireWellFormed=false]
+	 * When `true`, throws for content that would produce ill-formed XML.
+	 * @returns {string}
+	 * @throws {DOMException}
+	 * With code `INVALID_STATE_ERR` when `requireWellFormed` is `true` and:
+	 * - an Element's qualified name (including any namespace prefix) is not a valid XML QName,
+	 * - an attribute's qualified name (including a synthesized `xmlns:` namespace declaration) is
+	 *   not a valid XML QName,
+	 * - a CDATASection node's data contains `"]]>"`,
+	 * - a Comment node's data contains `"-->"` (bare `"--"` does not throw on this branch),
+	 * - a ProcessingInstruction's data contains `"?>"`,
+	 * - a DocumentType's `publicId` is non-empty and does not match the XML `PubidLiteral`
+	 *   production,
+	 * - a DocumentType's `systemId` is non-empty and does not match the XML `SystemLiteral`
+	 *   production, or
+	 * - a DocumentType's `internalSubset` contains `"]>"`.
+	 * Note: xmldom does not enforce `readonly` on DocumentType fields — direct property
+	 * writes succeed and are covered by the serializer-level checks above.
+	 * @see https://html.spec.whatwg.org/#dom-xmlserializer-serializetostring
+	 * @see https://w3c.github.io/DOM-Parsing/#xml-serialization
+	 * @see https://github.com/w3c/DOM-Parsing/issues/84
+	 */
+	XMLSerializer.prototype.serializeToString = function(node,isHtml,nodeFilter,options){
+		return nodeSerializeToString.call(node,isHtml,nodeFilter,options);
 	};
 	Node.prototype.toString = nodeSerializeToString;
-	function nodeSerializeToString(isHtml,nodeFilter){
+	function nodeSerializeToString(isHtml,nodeFilter,options){
+		var requireWellFormed = !!options && !!options.requireWellFormed;
 		var buf = [];
 		var refNode = this.nodeType == 9 && this.documentElement || this;
 		var prefix = refNode.prefix;
@@ -35431,7 +36276,7 @@ function requireDom () {
 				];
 			}
 		}
-		serializeToString(this,buf,isHtml,nodeFilter,visibleNamespaces);
+		serializeToString(this,buf,isHtml,nodeFilter,visibleNamespaces,requireWellFormed);
 		//console.log('###',this.nodeType,uri,prefix,buf.join(''))
 		return buf.join('');
 	}
@@ -35476,275 +36321,333 @@ function requireDom () {
 	 * @see https://www.w3.org/TR/xml11/#AVNormalize
 	 * @see https://w3c.github.io/DOM-Parsing/#serializing-an-element-s-attributes
 	 */
-	function addSerializedAttribute(buf, qualifiedName, value) {
+	function addSerializedAttribute(buf, qualifiedName, value, requireWellFormed) {
+		if (requireWellFormed && !tagNamePattern.test(qualifiedName)) {
+			throw new DOMException(INVALID_STATE_ERR, 'The attribute name "' + qualifiedName + '" is not a valid XML QName');
+		}
 		buf.push(' ', qualifiedName, '="', value.replace(/[<>&"\t\n\r]/g, _xmlEncoder), '"');
 	}
 
-	function serializeToString(node,buf,isHTML,nodeFilter,visibleNamespaces){
+	function serializeToString(node, buf, isHTML, nodeFilter, visibleNamespaces, requireWellFormed) {
 		if (!visibleNamespaces) {
 			visibleNamespaces = [];
 		}
+		walkDOM(node, { ns: visibleNamespaces, isHTML: isHTML }, {
+			enter: function (n, ctx) {
+				var ns = ctx.ns;
+				var html = ctx.isHTML;
 
-		if(nodeFilter){
-			node = nodeFilter(node);
-			if(node){
-				if(typeof node == 'string'){
-					buf.push(node);
-					return;
-				}
-			}else {
-				return;
-			}
-			//buf.sort.apply(attrs, attributeSorter);
-		}
-
-		switch(node.nodeType){
-		case ELEMENT_NODE:
-			var attrs = node.attributes;
-			var len = attrs.length;
-			var child = node.firstChild;
-			var nodeName = node.tagName;
-
-			isHTML = NAMESPACE.isHTML(node.namespaceURI) || isHTML;
-
-			var prefixedNodeName = nodeName;
-			if (!isHTML && !node.prefix && node.namespaceURI) {
-				var defaultNS;
-				// lookup current default ns from `xmlns` attribute
-				for (var ai = 0; ai < attrs.length; ai++) {
-					if (attrs.item(ai).name === 'xmlns') {
-						defaultNS = attrs.item(ai).value;
-						break
-					}
-				}
-				if (!defaultNS) {
-					// lookup current default ns in visibleNamespaces
-					for (var nsi = visibleNamespaces.length - 1; nsi >= 0; nsi--) {
-						var namespace = visibleNamespaces[nsi];
-						if (namespace.prefix === '' && namespace.namespace === node.namespaceURI) {
-							defaultNS = namespace.namespace;
-							break
+				if (nodeFilter) {
+					n = nodeFilter(n);
+					if (n) {
+						if (typeof n == 'string') {
+							buf.push(n);
+							return null;
 						}
+					} else {
+						return null;
 					}
 				}
-				if (defaultNS !== node.namespaceURI) {
-					for (var nsi = visibleNamespaces.length - 1; nsi >= 0; nsi--) {
-						var namespace = visibleNamespaces[nsi];
-						if (namespace.namespace === node.namespaceURI) {
-							if (namespace.prefix) {
-								prefixedNodeName = namespace.prefix + ':' + nodeName;
+
+				switch (n.nodeType) {
+					case ELEMENT_NODE:
+						var attrs = n.attributes;
+						var len = attrs.length;
+						var nodeName = n.tagName;
+
+						html = NAMESPACE.isHTML(n.namespaceURI) || html;
+
+						var prefixedNodeName = nodeName;
+						if (!html && !n.prefix && n.namespaceURI) {
+							var defaultNS;
+							// lookup current default ns from `xmlns` attribute
+							for (var ai = 0; ai < attrs.length; ai++) {
+								if (attrs.item(ai).name === 'xmlns') {
+									defaultNS = attrs.item(ai).value;
+									break;
+								}
 							}
-							break
+							if (!defaultNS) {
+								// lookup current default ns in visibleNamespaces
+								for (var nsi = ns.length - 1; nsi >= 0; nsi--) {
+									var nsEntry = ns[nsi];
+									if (nsEntry.prefix === '' && nsEntry.namespace === n.namespaceURI) {
+										defaultNS = nsEntry.namespace;
+										break;
+									}
+								}
+							}
+							if (defaultNS !== n.namespaceURI) {
+								for (var nsi = ns.length - 1; nsi >= 0; nsi--) {
+									var nsEntry = ns[nsi];
+									if (nsEntry.namespace === n.namespaceURI) {
+										if (nsEntry.prefix) {
+											prefixedNodeName = nsEntry.prefix + ':' + nodeName;
+										}
+										break;
+									}
+								}
+							}
 						}
-					}
-				}
-			}
 
-			buf.push('<', prefixedNodeName);
-
-			for(var i=0;i<len;i++){
-				// add namespaces for attributes
-				var attr = attrs.item(i);
-				if (attr.prefix == 'xmlns') {
-					visibleNamespaces.push({ prefix: attr.localName, namespace: attr.value });
-				}else if(attr.nodeName == 'xmlns'){
-					visibleNamespaces.push({ prefix: '', namespace: attr.value });
-				}
-			}
-
-			for(var i=0;i<len;i++){
-				var attr = attrs.item(i);
-				if (needNamespaceDefine(attr,isHTML, visibleNamespaces)) {
-					var prefix = attr.prefix||'';
-					var uri = attr.namespaceURI;
-					addSerializedAttribute(buf, prefix ? 'xmlns:' + prefix : "xmlns", uri);
-					visibleNamespaces.push({ prefix: prefix, namespace:uri });
-				}
-				serializeToString(attr,buf,isHTML,nodeFilter,visibleNamespaces);
-			}
-
-			// add namespace for current node
-			if (nodeName === prefixedNodeName && needNamespaceDefine(node, isHTML, visibleNamespaces)) {
-				var prefix = node.prefix||'';
-				var uri = node.namespaceURI;
-				addSerializedAttribute(buf, prefix ? 'xmlns:' + prefix : "xmlns", uri);
-				visibleNamespaces.push({ prefix: prefix, namespace:uri });
-			}
-
-			if(child || isHTML && !/^(?:meta|link|img|br|hr|input)$/i.test(nodeName)){
-				buf.push('>');
-				//if is cdata child node
-				if(isHTML && /^script$/i.test(nodeName)){
-					while(child){
-						if(child.data){
-							buf.push(child.data);
-						}else {
-							serializeToString(child, buf, isHTML, nodeFilter, visibleNamespaces.slice());
+						if (requireWellFormed && !tagNamePattern.test(prefixedNodeName)) {
+							throw new DOMException(INVALID_STATE_ERR, 'The element name "' + prefixedNodeName + '" is not a valid XML QName');
 						}
-						child = child.nextSibling;
-					}
-				}else
-				{
-					while(child){
-						serializeToString(child, buf, isHTML, nodeFilter, visibleNamespaces.slice());
-						child = child.nextSibling;
-					}
+						buf.push('<', prefixedNodeName);
+
+						// Build a fresh namespace snapshot for this element's children.
+						// The slice prevents sibling elements from inheriting each other's declarations.
+						var childNs = ns.slice();
+						for (var i = 0; i < len; i++) {
+							var attr = attrs.item(i);
+							if (attr.prefix == 'xmlns') {
+								childNs.push({ prefix: attr.localName, namespace: attr.value });
+							} else if (attr.nodeName == 'xmlns') {
+								childNs.push({ prefix: '', namespace: attr.value });
+							}
+						}
+
+						for (var i = 0; i < len; i++) {
+							var attr = attrs.item(i);
+							if (needNamespaceDefine(attr, html, childNs)) {
+								var attrPrefix = attr.prefix || '';
+								var uri = attr.namespaceURI;
+								addSerializedAttribute(buf, attrPrefix ? 'xmlns:' + attrPrefix : 'xmlns', uri, requireWellFormed);
+								childNs.push({ prefix: attrPrefix, namespace: uri });
+							}
+							// Apply nodeFilter and serialize the attribute.
+							var filteredAttr = nodeFilter ? nodeFilter(attr) : attr;
+							if (filteredAttr) {
+								if (typeof filteredAttr === 'string') {
+									buf.push(filteredAttr);
+								} else {
+									addSerializedAttribute(buf, filteredAttr.name, filteredAttr.value, requireWellFormed);
+								}
+							}
+						}
+
+						// add namespace for current node
+						if (nodeName === prefixedNodeName && needNamespaceDefine(n, html, childNs)) {
+							var nodePrefix = n.prefix || '';
+							var uri = n.namespaceURI;
+							addSerializedAttribute(buf, nodePrefix ? 'xmlns:' + nodePrefix : 'xmlns', uri, requireWellFormed);
+							childNs.push({ prefix: nodePrefix, namespace: uri });
+						}
+
+						var child = n.firstChild;
+						if (child || html && !/^(?:meta|link|img|br|hr|input)$/i.test(nodeName)) {
+							buf.push('>');
+							if (html && /^script$/i.test(nodeName)) {
+								// Inline serialization for <script> children; return null to skip walkDOM descent.
+								while (child) {
+									if (child.data) {
+										buf.push(child.data);
+									} else {
+										serializeToString(child, buf, html, nodeFilter, childNs.slice(), requireWellFormed);
+									}
+									child = child.nextSibling;
+								}
+								buf.push('</', nodeName, '>');
+								return null;
+							}
+							// Return child context; walkDOM descends and exit emits the closing tag.
+							return { ns: childNs, isHTML: html, tag: prefixedNodeName };
+						} else {
+							buf.push('/>');
+							return null;
+						}
+
+					case DOCUMENT_NODE:
+					case DOCUMENT_FRAGMENT_NODE:
+						// Descend into children; exit is a no-op (tag is null).
+						return { ns: ns.slice(), isHTML: html, tag: null };
+
+					case ATTRIBUTE_NODE:
+						addSerializedAttribute(buf, n.name, n.value, requireWellFormed);
+						return null;
+
+					case TEXT_NODE:
+						/**
+						 * The ampersand character (&) and the left angle bracket (<) must not appear in their literal form,
+						 * except when used as markup delimiters, or within a comment, a processing instruction, or a CDATA section.
+						 * If they are needed elsewhere, they must be escaped using either numeric character references or the strings
+						 * `&amp;` and `&lt;` respectively.
+						 * The right angle bracket (>) may be represented using the string " &gt; ", and must, for compatibility,
+						 * be escaped using either `&gt;` or a character reference when it appears in the string `]]>` in content,
+						 * when that string is not marking the end of a CDATA section.
+						 *
+						 * In the content of elements, character data is any string of characters
+						 * which does not contain the start-delimiter of any markup
+						 * and does not include the CDATA-section-close delimiter, `]]>`.
+						 *
+						 * @see https://www.w3.org/TR/xml/#NT-CharData
+						 * @see https://w3c.github.io/DOM-Parsing/#xml-serializing-a-text-node
+						 */
+						buf.push(n.data.replace(/[<&>]/g, _xmlEncoder));
+						return null;
+
+					case CDATA_SECTION_NODE:
+						if (requireWellFormed && n.data.indexOf(']]>') !== -1) {
+							throw new DOMException(INVALID_STATE_ERR, 'The CDATASection data contains "]]>"');
+						}
+						buf.push('<![CDATA[', n.data.replace(/]]>/g, ']]]]><![CDATA[>'), ']]>');
+						return null;
+
+					case COMMENT_NODE:
+						if (requireWellFormed && n.data.indexOf('-->') !== -1) {
+							throw new DOMException(INVALID_STATE_ERR, 'The comment node data contains "-->"');
+						}
+						buf.push('<!--', n.data, '-->');
+						return null;
+
+					case DOCUMENT_TYPE_NODE:
+						if (requireWellFormed) {
+							if (n.publicId && !/^("[\x20\r\na-zA-Z0-9\-()+,.\/:=?;!*#@$_%']*"|'[\x20\r\na-zA-Z0-9\-()+,.\/:=?;!*#@$_%'"]*')$/.test(n.publicId)) {
+								throw new DOMException(INVALID_STATE_ERR, 'DocumentType publicId is not a valid PubidLiteral');
+							}
+							if (n.systemId && !/^("[^"]*"|'[^']*')$/.test(n.systemId)) {
+								throw new DOMException(INVALID_STATE_ERR, 'DocumentType systemId is not a valid SystemLiteral');
+							}
+							if (n.internalSubset && n.internalSubset.indexOf(']>') !== -1) {
+								throw new DOMException(INVALID_STATE_ERR, 'DocumentType internalSubset contains "]>"');
+							}
+						}
+						var pubid = n.publicId;
+						var sysid = n.systemId;
+						buf.push('<!DOCTYPE ', n.name);
+						if (pubid) {
+							buf.push(' PUBLIC ', pubid);
+							if (sysid && sysid != '.') {
+								buf.push(' ', sysid);
+							}
+							buf.push('>');
+						} else if (sysid && sysid != '.') {
+							buf.push(' SYSTEM ', sysid, '>');
+						} else {
+							var sub = n.internalSubset;
+							if (sub) {
+								buf.push(' [', sub, ']');
+							}
+							buf.push('>');
+						}
+						return null;
+
+					case PROCESSING_INSTRUCTION_NODE:
+						if (requireWellFormed && n.data.indexOf('?>') !== -1) {
+							throw new DOMException(INVALID_STATE_ERR, 'The ProcessingInstruction data contains "?>"');
+						}
+						buf.push('<?', n.target, ' ', n.data, '?>');
+						return null;
+
+					case ENTITY_REFERENCE_NODE:
+						buf.push('&', n.nodeName, ';');
+						return null;
+
+					//case ENTITY_NODE:
+					//case NOTATION_NODE:
+					default:
+						buf.push('??', n.nodeName);
+						return null;
 				}
-				buf.push('</',prefixedNodeName,'>');
-			}else {
-				buf.push('/>');
-			}
-			// remove added visible namespaces
-			//visibleNamespaces.length = startVisibleNamespaces;
-			return;
-		case DOCUMENT_NODE:
-		case DOCUMENT_FRAGMENT_NODE:
-			var child = node.firstChild;
-			while(child){
-				serializeToString(child, buf, isHTML, nodeFilter, visibleNamespaces.slice());
-				child = child.nextSibling;
-			}
-			return;
-		case ATTRIBUTE_NODE:
-			return addSerializedAttribute(buf, node.name, node.value);
-		case TEXT_NODE:
-			/**
-			 * The ampersand character (&) and the left angle bracket (<) must not appear in their literal form,
-			 * except when used as markup delimiters, or within a comment, a processing instruction, or a CDATA section.
-			 * If they are needed elsewhere, they must be escaped using either numeric character references or the strings
-			 * `&amp;` and `&lt;` respectively.
-			 * The right angle bracket (>) may be represented using the string " &gt; ", and must, for compatibility,
-			 * be escaped using either `&gt;` or a character reference when it appears in the string `]]>` in content,
-			 * when that string is not marking the end of a CDATA section.
-			 *
-			 * In the content of elements, character data is any string of characters
-			 * which does not contain the start-delimiter of any markup
-			 * and does not include the CDATA-section-close delimiter, `]]>`.
-			 *
-			 * @see https://www.w3.org/TR/xml/#NT-CharData
-			 * @see https://w3c.github.io/DOM-Parsing/#xml-serializing-a-text-node
-			 */
-			return buf.push(node.data
-				.replace(/[<&>]/g,_xmlEncoder)
-			);
-		case CDATA_SECTION_NODE:
-			return buf.push( '<![CDATA[',node.data,']]>');
-		case COMMENT_NODE:
-			return buf.push( "<!--",node.data,"-->");
-		case DOCUMENT_TYPE_NODE:
-			var pubid = node.publicId;
-			var sysid = node.systemId;
-			buf.push('<!DOCTYPE ',node.name);
-			if(pubid){
-				buf.push(' PUBLIC ', pubid);
-				if (sysid && sysid!='.') {
-					buf.push(' ', sysid);
+			},
+			exit: function (n, childCtx) {
+				if (childCtx && childCtx.tag) {
+					buf.push('</', childCtx.tag, '>');
 				}
-				buf.push('>');
-			}else if(sysid && sysid!='.'){
-				buf.push(' SYSTEM ', sysid, '>');
-			}else {
-				var sub = node.internalSubset;
-				if(sub){
-					buf.push(" [",sub,"]");
-				}
-				buf.push(">");
-			}
-			return;
-		case PROCESSING_INSTRUCTION_NODE:
-			return buf.push( "<?",node.target," ",node.data,"?>");
-		case ENTITY_REFERENCE_NODE:
-			return buf.push( '&',node.nodeName,';');
-		//case ENTITY_NODE:
-		//case NOTATION_NODE:
-		default:
-			buf.push('??',node.nodeName);
-		}
+			},
+		});
 	}
-	function importNode(doc,node,deep){
-		var node2;
-		switch (node.nodeType) {
-		case ELEMENT_NODE:
-			node2 = node.cloneNode(false);
-			node2.ownerDocument = doc;
-			//var attrs = node2.attributes;
-			//var len = attrs.length;
-			//for(var i=0;i<len;i++){
-				//node2.setAttributeNodeNS(importNode(doc,attrs.item(i),deep));
-			//}
-		case DOCUMENT_FRAGMENT_NODE:
-			break;
-		case ATTRIBUTE_NODE:
-			deep = true;
-			break;
-		//case ENTITY_REFERENCE_NODE:
-		//case PROCESSING_INSTRUCTION_NODE:
-		////case TEXT_NODE:
-		//case CDATA_SECTION_NODE:
-		//case COMMENT_NODE:
-		//	deep = false;
-		//	break;
-		//case DOCUMENT_NODE:
-		//case DOCUMENT_TYPE_NODE:
-		//cannot be imported.
-		//case ENTITY_NODE:
-		//case NOTATION_NODE：
-		//can not hit in level3
-		//default:throw e;
-		}
-		if(!node2){
-			node2 = node.cloneNode(false);//false
-		}
-		node2.ownerDocument = doc;
-		node2.parentNode = null;
-		if(deep){
-			var child = node.firstChild;
-			while(child){
-				node2.appendChild(importNode(doc,child,deep));
-				child = child.nextSibling;
-			}
-		}
-		return node2;
+	/**
+	 * Imports a node from a different document into `doc`, creating a new copy.
+	 * Delegates to {@link walkDOM} for traversal. Each node in the subtree is shallow-cloned,
+	 * stamped with `doc` as its `ownerDocument`, and detached (`parentNode` set to `null`).
+	 * Children are imported recursively when `deep` is `true`; for {@link Attr} nodes `deep` is
+	 * always forced to `true`
+	 * because an attribute's value lives in a child text node.
+	 *
+	 * @param {Document} doc
+	 * The document that will own the imported node.
+	 * @param {Node} node
+	 * The node to import.
+	 * @param {boolean} deep
+	 * If `true`, descendants are imported recursively.
+	 * @returns {Node}
+	 * The newly imported node, now owned by `doc`.
+	 */
+	function importNode(doc, node, deep) {
+		var destRoot;
+		walkDOM(node, null, {
+			enter: function (srcNode, destParent) {
+				// Shallow-clone the node and stamp it into the target document.
+				var destNode = srcNode.cloneNode(false);
+				destNode.ownerDocument = doc;
+				destNode.parentNode = null;
+				// capture as the root of the imported subtree or attach to parent.
+				if (destParent === null) {
+					destRoot = destNode;
+				} else {
+					destParent.appendChild(destNode);
+				}
+				// ATTRIBUTE_NODE must always be imported deeply: its value lives in a child text node.
+				var shouldDeep = srcNode.nodeType === ATTRIBUTE_NODE || deep;
+				return shouldDeep ? destNode : null;
+			},
+		});
+		return destRoot;
 	}
 	//
 	//var _relationMap = {firstChild:1,lastChild:1,previousSibling:1,nextSibling:1,
 	//					attributes:1,childNodes:1,parentNode:1,documentElement:1,doctype,};
-	function cloneNode(doc,node,deep){
-		var node2 = new node.constructor();
-		for (var n in node) {
-			if (Object.prototype.hasOwnProperty.call(node, n)) {
-				var v = node[n];
-				if (typeof v != "object") {
-					if (v != node2[n]) {
-						node2[n] = v;
+	function cloneNode(doc, node, deep) {
+		var destRoot;
+		walkDOM(node, null, {
+			enter: function (srcNode, destParent) {
+				// 1. Create a blank node of the same type and copy all scalar own properties.
+				var destNode = new srcNode.constructor();
+				for (var n in srcNode) {
+					if (Object.prototype.hasOwnProperty.call(srcNode, n)) {
+						var v = srcNode[n];
+						if (typeof v != 'object') {
+							if (v != destNode[n]) {
+								destNode[n] = v;
+							}
+						}
 					}
 				}
-			}
-		}
-		if(node.childNodes){
-			node2.childNodes = new NodeList();
-		}
-		node2.ownerDocument = doc;
-		switch (node2.nodeType) {
-		case ELEMENT_NODE:
-			var attrs	= node.attributes;
-			var attrs2	= node2.attributes = new NamedNodeMap();
-			var len = attrs.length;
-			attrs2._ownerElement = node2;
-			for(var i=0;i<len;i++){
-				node2.setAttributeNode(cloneNode(doc,attrs.item(i),true));
-			}
-			break;		case ATTRIBUTE_NODE:
-			deep = true;
-		}
-		if(deep){
-			var child = node.firstChild;
-			while(child){
-				node2.appendChild(cloneNode(doc,child,deep));
-				child = child.nextSibling;
-			}
-		}
-		return node2;
+				if (srcNode.childNodes) {
+					destNode.childNodes = new NodeList();
+				}
+				destNode.ownerDocument = doc;
+				// 2. Handle node-type-specific setup.
+				//    Attributes are not DOM children, so they are cloned inline here
+				//    rather than by walkDOM descent.
+				//    ATTRIBUTE_NODE forces deep=true so its own children are walked.
+				var shouldDeep = deep;
+				switch (destNode.nodeType) {
+					case ELEMENT_NODE:
+						var attrs = srcNode.attributes;
+						var attrs2 = (destNode.attributes = new NamedNodeMap());
+						var len = attrs.length;
+						attrs2._ownerElement = destNode;
+						for (var i = 0; i < len; i++) {
+							destNode.setAttributeNode(cloneNode(doc, attrs.item(i), true));
+						}
+						break;
+					case ATTRIBUTE_NODE:
+						shouldDeep = true;
+				}
+				// 3. Attach to parent, or capture as the root of the cloned subtree.
+				if (destParent !== null) {
+					destParent.appendChild(destNode);
+				} else {
+					destRoot = destNode;
+				}
+				// 4. Return destNode as the context for children (causes walkDOM to descend),
+				//    or null to skip children (shallow clone).
+				return shouldDeep ? destNode : null;
+			},
+		});
+		return destRoot;
 	}
 
 	function __set__(object,key,value){
@@ -35760,48 +36663,54 @@ function requireDom () {
 				}
 			});
 
-			Object.defineProperty(Node.prototype,'textContent',{
-				get:function(){
-					return getTextContent(this);
+			/**
+			 * The text content of this node and its descendants.
+			 *
+			 * Setting `textContent` on an element or document fragment replaces all child nodes with a
+			 * single text node; on other nodes it sets `data`, `value`, and `nodeValue` directly.
+			 *
+			 * @type {string | null}
+			 * @see {@link https://dom.spec.whatwg.org/#dom-node-textcontent}
+			 */
+			Object.defineProperty(Node.prototype, 'textContent', {
+				get: function () {
+					if (this.nodeType === ELEMENT_NODE || this.nodeType === DOCUMENT_FRAGMENT_NODE) {
+						var buf = [];
+						walkDOM(this, null, {
+							enter: function (n) {
+								if (n.nodeType === ELEMENT_NODE || n.nodeType === DOCUMENT_FRAGMENT_NODE) {
+									return true; // enter children
+								}
+								if (n.nodeType === PROCESSING_INSTRUCTION_NODE || n.nodeType === COMMENT_NODE) {
+									return null; // excluded from text content
+								}
+								buf.push(n.nodeValue);
+							},
+						});
+						return buf.join('');
+					}
+					return this.nodeValue;
 				},
 
-				set:function(data){
-					switch(this.nodeType){
-					case ELEMENT_NODE:
-					case DOCUMENT_FRAGMENT_NODE:
-						while(this.firstChild){
-							this.removeChild(this.firstChild);
-						}
-						if(data || String(data)){
-							this.appendChild(this.ownerDocument.createTextNode(data));
-						}
-						break;
+				set: function (data) {
+					switch (this.nodeType) {
+						case ELEMENT_NODE:
+						case DOCUMENT_FRAGMENT_NODE:
+							while (this.firstChild) {
+								this.removeChild(this.firstChild);
+							}
+							if (data || String(data)) {
+								this.appendChild(this.ownerDocument.createTextNode(data));
+							}
+							break;
 
-					default:
-						this.data = data;
-						this.value = data;
-						this.nodeValue = data;
+						default:
+							this.data = data;
+							this.value = data;
+							this.nodeValue = data;
 					}
-				}
+				},
 			});
-
-			function getTextContent(node){
-				switch(node.nodeType){
-				case ELEMENT_NODE:
-				case DOCUMENT_FRAGMENT_NODE:
-					var buf = [];
-					node = node.firstChild;
-					while(node){
-						if(node.nodeType!==7 && node.nodeType !==8){
-							buf.push(getTextContent(node));
-						}
-						node = node.nextSibling;
-					}
-					return buf.join('');
-				default:
-					return node.nodeValue;
-				}
-			}
 
 			__set__ = function(object,key,value){
 				//console.log(value)
@@ -35818,6 +36727,7 @@ function requireDom () {
 		dom.Element = Element;
 		dom.Node = Node;
 		dom.NodeList = NodeList;
+		dom.walkDOM = walkDOM;
 		dom.XMLSerializer = XMLSerializer;
 	//}
 	return dom;
@@ -38010,14 +38920,8 @@ function requireSax () {
 	if (hasRequiredSax) return sax;
 	hasRequiredSax = 1;
 	var NAMESPACE = requireConventions().NAMESPACE;
+	var tagNamePattern = requireConventions().tagNamePattern;
 
-	//[4]   	NameStartChar	   ::=   	":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#x2FF] | [#x370-#x37D] | [#x37F-#x1FFF] | [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF] | [#x3001-#xD7FF] | [#xF900-#xFDCF] | [#xFDF0-#xFFFD] | [#x10000-#xEFFFF]
-	//[4a]   	NameChar	   ::=   	NameStartChar | "-" | "." | [0-9] | #xB7 | [#x0300-#x036F] | [#x203F-#x2040]
-	//[5]   	Name	   ::=   	NameStartChar (NameChar)*
-	var nameStartChar = /[A-Z_a-z\xC0-\xD6\xD8-\xF6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]/;//\u10000-\uEFFFF
-	var nameChar = new RegExp("[\\-\\.0-9"+nameStartChar.source.slice(1,-1)+"\\u00B7\\u0300-\\u036F\\u203F-\\u2040]");
-	var tagNamePattern = new RegExp('^'+nameStartChar.source+nameChar.source+'*(?:\:'+nameStartChar.source+nameChar.source+'*)?$');
-	//var tagNamePattern = /^[a-zA-Z_][\w\-\.]*(?:\:[a-zA-Z_][\w\-\.]*)?$/
 	//var handlers = 'resolveEntity,getExternalSubset,characters,endDocument,endElement,endPrefixMapping,ignorableWhitespace,processingInstruction,setDocumentLocator,skippedEntity,startDocument,startElement,startPrefixMapping,notationDecl,unparsedEntityDecl,error,fatalError,warning,attributeDecl,elementDecl,externalEntityDecl,internalEntityDecl,comment,endCDATA,endDTD,endEntity,startCDATA,startDTD,startEntity'.split(',')
 
 	//S_TAG,	S_ATTR,	S_EQ,	S_ATTR_NOQUOT_VALUE
@@ -38608,7 +39512,7 @@ function requireSax () {
 	function parseInstruction(source,start,domBuilder){
 		var end = source.indexOf('?>',start);
 		if(end){
-			var match = source.substring(start,end).match(/^<\?(\S*)\s*([\s\S]*?)\s*$/);
+			var match = source.substring(start,end).match(/^<\?(\S*)\s*([\s\S]*?)$/);
 			if(match){
 				match[0].length;
 				domBuilder.processingInstruction(match[1], match[2]) ;

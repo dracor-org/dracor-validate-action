@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-/* global fetch */
 // Detects new upstream releases of the DraCor and TEI-All schemas, downloads
 // the schema files into schemas/, and updates the default versions in
 // src/config.ts and the sentence about defaults in README.md.
