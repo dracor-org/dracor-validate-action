@@ -39,6 +39,23 @@ set this to `"yes"`. This can be useful if you want to run the validation for
 informational purposes only without possibly blocking pull requests from being
 merged. Default `"no"`.
 
+## Versioning
+
+Released versions ship as prebuilt Docker images on
+[Docker Hub](https://hub.docker.com/r/dracor/validate-action). At release time
+an `action.yml` on the tagged commit points at the exact image tag, so your
+`uses:` pin drives which image is pulled:
+
+- `dracor-org/dracor-validate-action@3` — latest 3.x.y image, gets minor and
+  patch updates automatically.
+- `dracor-org/dracor-validate-action@3.0.0` — exactly the 3.0.0 image.
+- `dracor-org/dracor-validate-action@main` or a plain commit SHA on `main` — the
+  runner builds the image locally from the `Dockerfile` instead of pulling.
+  Useful for testing changes before a release.
+
+Tags do not use a `v` prefix: the git tag equals the semver literally (`3.0.0`,
+`3.0`, `3`). See [RELEASING.md](RELEASING.md) for the release procedure.
+
 ## Examples
 
 ### Basic usage
@@ -56,19 +73,19 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate against current TEI-All schema
-        uses: dracor-org/dracor-validate-action@v2.0.0
+        uses: dracor-org/dracor-validate-action@3
         with:
           files: tei/*.xml
 
       - name: Validate against older TEI-All schema
-        uses: dracor-org/dracor-validate-action@v2.0.0
+        uses: dracor-org/dracor-validate-action@3
         with:
           files: tei/*.xml
           version: '4.6.0'
           warn-only: 'yes'
 
       - name: Validate against current DraCor schema
-        uses: dracor-org/dracor-validate-action@v2.0.0
+        uses: dracor-org/dracor-validate-action@3
         with:
           files: tei/*.xml
           schema: dracor
@@ -126,7 +143,7 @@ jobs:
 
       # Validate
       - name: Validate against current DraCor schema
-        uses: dracor-org/dracor-validate-action@v2.0.0
+        uses: dracor-org/dracor-validate-action@3
         with:
           files: |
             ${{ steps.changed-tei-files.outputs.all_changed_files }}
@@ -143,8 +160,8 @@ following examples we assume you are running the Docker commands from the
 directory containing a directory `tei`.
 
 ```sh
-docker pull dracor/validate-action:latest
-docker run --rm -it -e INPUT_FILES='/tei/*.xml' -v $PWD/tei:/tei dracor/validate-action
+docker pull dracor/validate-action:3
+docker run --rm -it -e INPUT_FILES='/tei/*.xml' -v $PWD/tei:/tei dracor/validate-action:3
 ```
 
 This validates each XML file in the `tei` directory against the latest supported
@@ -159,7 +176,7 @@ docker run --rm -it \
   -e INPUT_SCHEMA=tei \
   -e INPUT_VERSION='4.6.0' \
   -v $PWD/tei:/tei \
-  dracor/validate-action
+  dracor/validate-action:3
 ```
 
 ## Development
