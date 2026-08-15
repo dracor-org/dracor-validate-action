@@ -1,0 +1,177 @@
+name: Release
+
+# See RELEASING.md for the full release procedure.
+#
+# What this workflow does, in order:
+#   1. Validate the version input is bare semver (no `v` prefix).
+#   2. Build and push a multi-arch Docker image to
+#      dracor/validate-action, tagged {version}, {major}.{minor}, and
+#      {major}.
+#   3. Create a detached commit on top of main that rewrites the
+#      action.yml `image:` field to point at the exact version tag.
+#      This commit never lands on main; only tags reference it.
+#   4. Tag that commit as {version} (created fresh), then force-move
+#      the floating {major}.{minor} and {major} tags to the same
+#      commit.
+#   5. Create a GitHub Release pointing at the {version} tag.
+#
+# Consumers see:
+#   @{version} -> exact image (release commit's action.yml pins the exact tag)
+#   @{major}   -> latest {major}.*.* image (floating tag)
+#   @main / @<sha> on main -> action.yml still says `image: Dockerfile`,
+#                             so the runner builds the image locally
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Bare semver to release, e.g. 3.0.0 (no `v` prefix)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish ${{ inputs.version }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate version input
+        id: version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "Version '$VERSION' is not bare semver (expected e.g. 3.0.0 or 3.0.0-rc.1, no 'v' prefix)." >&2
+            exit 1
+          fi
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          if echo "$VERSION" | grep -q -- '-'; then
+            IS_PRERELEASE=true
+          else
+            IS_PRERELEASE=false
+          fi
+          {
+            echo "version=$VERSION"
+            echo "minor_tag=${MAJOR}.${MINOR}"
+            echo "major_tag=${MAJOR}"
+            echo "is_prerelease=$IS_PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out main
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v6.0.1
+        with:
+          ref: main
+          # Full history so we can push tags back.
+          fetch-depth: 0
+          # Use a token that can push tags (default token is fine when
+          # branch protection doesn't restrict tag creation).
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Login to DockerHub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USER }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      # metadata-action's `type=semver,pattern={{major}}...` rules
+      # automatically skip the floating tags for prerelease versions.
+      # `latest=false` disables the default `:latest` tag.
+      - name: Compute Docker image tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: dracor/validate-action
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}},value=${{ steps.version.outputs.version }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: true
+          platforms: |
+            linux/amd64
+            linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create detached release commit
+        id: commit
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Detach so the commit isn't on main.
+          git checkout --detach
+
+          # Rewrite the `image:` line in action.yml.
+          sed -i.bak -E \
+            "s|^([[:space:]]*image:)[[:space:]]+Dockerfile[[:space:]]*$|\1 docker://dracor/validate-action:${VERSION}|" \
+            action.yml
+          rm action.yml.bak
+
+          if git diff --quiet -- action.yml; then
+            echo "action.yml unchanged after rewrite — main is probably not on 'image: Dockerfile'. Aborting." >&2
+            exit 1
+          fi
+
+          git add action.yml
+          git commit -m "release ${VERSION}"
+          SHA=$(git rev-parse HEAD)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Tag and push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          MINOR_TAG: ${{ steps.version.outputs.minor_tag }}
+          MAJOR_TAG: ${{ steps.version.outputs.major_tag }}
+          IS_PRERELEASE: ${{ steps.version.outputs.is_prerelease }}
+        run: |
+          # Exact-version tag: -f makes re-runs idempotent (target is
+          # always a fresh detached commit).
+          git tag -f "$VERSION"
+          git push origin --force "refs/tags/$VERSION"
+
+          # Floating tags are only moved by stable releases so
+          # consumers on `@3` don't accidentally get a prerelease.
+          if [ "$IS_PRERELEASE" = "false" ]; then
+            git tag -f "$MINOR_TAG"
+            git tag -f "$MAJOR_TAG"
+            git push origin --force "refs/tags/$MINOR_TAG"
+            git push origin --force "refs/tags/$MAJOR_TAG"
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA: ${{ steps.commit.outputs.sha }}
+          IS_PRERELEASE: ${{ steps.version.outputs.is_prerelease }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          # shellcheck disable=SC2086
+          gh release create "$VERSION" \
+            --target "$SHA" \
+            --title "$VERSION" \
+            --generate-notes \
+            $PRERELEASE_FLAG
