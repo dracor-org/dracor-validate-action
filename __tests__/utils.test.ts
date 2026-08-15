@@ -1,8 +1,8 @@
-import { jest } from '@jest/globals';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { join } from 'path';
 import * as core from '../__fixtures__/core.js';
 
-jest.unstable_mockModule('@actions/core', () => core);
+vi.mock('@actions/core', () => core);
 
 const {
   defaultVersion,
@@ -77,7 +77,7 @@ describe('utils.ts', () => {
 
   describe('getParams', () => {
     afterEach(() => {
-      jest.resetAllMocks();
+      vi.resetAllMocks();
     });
 
     it('returns defaults when no inputs are provided', () => {

@@ -17,16 +17,15 @@ action layout, workflow suite).
 ## Commands
 
 - `pnpm install` — install dependencies
-- `pnpm test` — run Jest tests (uses `--experimental-vm-modules` because the
-  project is pure ESM)
-- `pnpm exec jest __tests__/utils.test.ts` — run a single test file
-- `pnpm exec jest -t "pattern"` — run tests matching a name pattern
+- `pnpm test` — run Vitest tests
+- `pnpm exec vitest __tests__/utils.test.ts` — run a single test file
+- `pnpm exec vitest -t "pattern"` — run tests matching a name pattern
 - `pnpm run lint` — ESLint
 - `pnpm run format:write` / `format:check` — Prettier
-- `pnpm run package` — Rollup-bundle `src/index.ts` → `dist/index.js`
+- `pnpm run package` — Rolldown-bundle `src/index.ts` → `dist/index.js`
 - `pnpm run bundle` — format + package (run before committing)
-- `pnpm run all` — full pre-commit workflow: format, lint, test, coverage,
-  package
+- `pnpm run all` — full pre-commit workflow: format, lint, test with coverage,
+  coverage badge, package
 
 ## Architecture
 
@@ -71,10 +70,11 @@ before committing changes to `src/`.
 ## Testing conventions
 
 Tests live in [**tests**/](__tests__/) and mock `@actions/core` /
-`@actions/exec` via [**fixtures**/](__fixtures__/) using Jest ESM
-`jest.unstable_mockModule` (see existing tests for pattern). ts-jest runs with
-ESM enabled — imports in source use explicit `.js` extensions (e.g.
-`from './utils.js'`) even though the sources are `.ts`.
+`@actions/exec` via [**fixtures**/](__fixtures__/). Vitest hoists `vi.mock()`
+calls above the imports, so the module under test is loaded via
+`await import('../src/foo.js')` after the mocks are declared. Source imports use
+explicit `.js` extensions (e.g. `from './utils.js'`) even though the sources are
+`.ts`, because the emitted bundle is ESM.
 
 ## Package manager
 
