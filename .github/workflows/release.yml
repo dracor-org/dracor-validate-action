@@ -49,11 +49,16 @@ jobs:
           fi
           MAJOR=$(echo "$VERSION" | cut -d. -f1)
           MINOR=$(echo "$VERSION" | cut -d. -f2)
+          if echo "$VERSION" | grep -q -- '-'; then
+            IS_PRERELEASE=true
+          else
+            IS_PRERELEASE=false
+          fi
           {
             echo "version=$VERSION"
-            echo "major=$MAJOR"
             echo "minor_tag=${MAJOR}.${MINOR}"
             echo "major_tag=${MAJOR}"
+            echo "is_prerelease=$IS_PRERELEASE"
           } >> "$GITHUB_OUTPUT"
 
       - name: Check out main
@@ -78,6 +83,20 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USER }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
+      # metadata-action's `type=semver,pattern={{major}}...` rules
+      # automatically skip the floating tags for prerelease versions.
+      # `latest=false` disables the default `:latest` tag.
+      - name: Compute Docker image tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: dracor/validate-action
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}},value=${{ steps.version.outputs.version }}
+
       - name: Build and push Docker image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -86,10 +105,8 @@ jobs:
           platforms: |
             linux/amd64
             linux/arm64
-          tags: |
-            dracor/validate-action:${{ steps.version.outputs.version }}
-            dracor/validate-action:${{ steps.version.outputs.minor_tag }}
-            dracor/validate-action:${{ steps.version.outputs.major_tag }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
       - name: Configure git identity
         run: |
@@ -125,24 +142,36 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           MINOR_TAG: ${{ steps.version.outputs.minor_tag }}
           MAJOR_TAG: ${{ steps.version.outputs.major_tag }}
+          IS_PRERELEASE: ${{ steps.version.outputs.is_prerelease }}
         run: |
-          # Exact-version tag: create fresh. If a re-run creates it,
-          # -f is fine because the target is a fresh detached commit.
+          # Exact-version tag: -f makes re-runs idempotent (target is
+          # always a fresh detached commit).
           git tag -f "$VERSION"
-          git tag -f "$MINOR_TAG"
-          git tag -f "$MAJOR_TAG"
-
           git push origin --force "refs/tags/$VERSION"
-          git push origin --force "refs/tags/$MINOR_TAG"
-          git push origin --force "refs/tags/$MAJOR_TAG"
+
+          # Floating tags are only moved by stable releases so
+          # consumers on `@3` don't accidentally get a prerelease.
+          if [ "$IS_PRERELEASE" = "false" ]; then
+            git tag -f "$MINOR_TAG"
+            git tag -f "$MAJOR_TAG"
+            git push origin --force "refs/tags/$MINOR_TAG"
+            git push origin --force "refs/tags/$MAJOR_TAG"
+          fi
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
           SHA: ${{ steps.commit.outputs.sha }}
+          IS_PRERELEASE: ${{ steps.version.outputs.is_prerelease }}
         run: |
+          PRERELEASE_FLAG=""
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          # shellcheck disable=SC2086
           gh release create "$VERSION" \
             --target "$SHA" \
             --title "$VERSION" \
-            --generate-notes
+            --generate-notes \
+            $PRERELEASE_FLAG

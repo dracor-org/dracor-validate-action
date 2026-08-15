@@ -39,6 +39,20 @@ commits are referenced only by tags — they never land on `main`.
        files: tei/*.xml
    ```
 
+## Prereleases
+
+If the `version` input contains a `-` (e.g. `3.0.0-rc.1`), the workflow treats
+it as a prerelease:
+
+- Only the exact `{version}` git tag is created, and only the
+  `dracor/validate-action:{version}` image tag is pushed. The floating `{major}`
+  and `{major}.{minor}` tags are left alone so consumers pinning `@3` do not
+  accidentally get a prerelease.
+- The GitHub Release is created with `--prerelease`.
+
+Use prereleases to dry-run the workflow end-to-end (image push, action.yml
+rewrite, tag creation, release notes) before cutting a stable release.
+
 ## Why the tag force-move is unavoidable
 
 `{major}` and `{major}.{minor}` are floating pointers by design — every release
