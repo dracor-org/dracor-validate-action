@@ -9,10 +9,11 @@ GitHub Action that validates XML (TEI) documents against Relax NG and Schematron
 schemas. Distributed as a Docker-based action and also published as the
 `dracor/validate-action` Docker image usable standalone.
 
-Scaffolded from
-[actions/container-toolkit-action](https://github.com/actions/container-toolkit-action)
-— that template explains the surrounding conventions (bundled `dist/`, Docker
-action layout, workflow suite).
+Originally scaffolded from
+[actions/container-toolkit-action](https://github.com/actions/container-toolkit-action).
+The scaffold is treated as a one-time snapshot: cherry-pick manually if a future
+template revision is worth pulling in, but do not attempt to merge or rebase
+against upstream.
 
 ## Commands
 
@@ -34,8 +35,10 @@ needs the `jing` (Relax NG) and Java-based `schxslt-cli.jar` (Schematron) tools
 installed in the runner. Flow:
 
 1. [action.yml](action.yml) declares `runs.using: docker` pointing at
-   [Dockerfile](Dockerfile), which installs `jing` + downloads `schxslt-cli.jar`
-   and sets ENTRYPOINT to `node /usr/src/app/dist/index.js`.
+   [Dockerfile](Dockerfile). The Dockerfile is multi-stage: stage 1 uses
+   `pnpm run package` to bundle `src/` into `dist/index.js`; stage 2 is the
+   runtime image on `node:26-slim` with `jing` and `schxslt-cli.jar` installed.
+   ENTRYPOINT is `node /usr/src/app/dist/index.js`.
 2. [src/index.ts](src/index.ts) → [src/main.ts](src/main.ts) reads inputs via
    `@actions/core`, resolves file paths (glob or space-separated) via
    [src/utils.ts](src/utils.ts), and picks the schema files from the bundled
@@ -60,12 +63,14 @@ in [src/config.ts](src/config.ts) (`TEI_VERSION`, `DRACOR_VERSION`). To add a
 new schema version: drop the files into `schemas/`, bump the constant in
 `config.ts` if it becomes the new default, and update [README.md](README.md).
 
-## Committed `dist/`
+## Build output
 
-The `dist/` directory is checked in and must match the source. The
-[.github/workflows/check-dist.yml](.github/workflows/check-dist.yml) CI check
-fails PRs whose `dist/` drifts. Always run `pnpm run bundle` (or `pnpm run all`)
-before committing changes to `src/`.
+The `dist/` directory is `.gitignore`d. It is regenerated on demand:
+
+- Locally by `pnpm run package` (or `pnpm run bundle` / `pnpm run all`).
+- Inside the container by the Dockerfile's build stage.
+
+There is no committed bundle and no drift-check workflow.
 
 ## Testing conventions
 
@@ -81,4 +86,5 @@ explicit `.js` extensions (e.g. `from './utils.js'`) even though the sources are
 The lockfile is `pnpm-lock.yaml`; the pnpm version is pinned via the
 `packageManager` field in [package.json](package.json). CI installs pnpm via
 `pnpm/action-setup` and runs `pnpm install --frozen-lockfile`. The Dockerfile
-copies the prebuilt `dist/` and does not run a package manager.
+installs pnpm globally in its build stage to run the same bundler; the runtime
+stage never touches a package manager.

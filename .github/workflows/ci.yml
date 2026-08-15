@@ -74,14 +74,24 @@ jobs:
           push: true
           tags: ${{ env.TEST_TAG }}
 
-      - name: Run the Container
-        id: run
-        env:
-          INPUT_MILLISECONDS: 2000
+      - name: Run the Container against a valid file
         run: |
           docker run \
-            --env INPUT_MILLISECONDS="${{ env.INPUT_MILLISECONDS }}" \
-            --rm ${{ env.TEST_TAG }}
+            --rm \
+            -v "${{ github.workspace }}/tei:/data" \
+            -e "INPUT_FILES=/data/valid.xml" \
+            -e "INPUT_SCHEMA=tei" \
+            ${{ env.TEST_TAG }}
+
+      - name: Run the Container against an invalid file with warn-only
+        run: |
+          docker run \
+            --rm \
+            -v "${{ github.workspace }}/tei:/data" \
+            -e "INPUT_FILES=/data/invalid.xml" \
+            -e "INPUT_SCHEMA=tei" \
+            -e "INPUT_WARN-ONLY=yes" \
+            ${{ env.TEST_TAG }}
 
   test-action:
     name: GitHub Action Test
