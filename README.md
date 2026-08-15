@@ -154,10 +154,30 @@ jobs:
 ## Validating locally
 
 With Docker installed this action can also be run locally to validate one or
-more TEI files. You need to mount your local TEI files to the `/tei` directory
-in the Docker container and adjust the `files` input accordingly. For the
-following examples we assume you are running the Docker commands from the
-directory containing a directory `tei`.
+more TEI files.
+
+### Using the `./validate` wrapper
+
+The repository ships a small `./validate` shell script that wraps the Docker
+invocation. It pulls the latest patch of the current major image tag and mounts
+a directory or single file for you:
+
+```sh
+./validate tei                       # validate tei/*.xml (default TEI schema)
+./validate --schema dracor tei       # validate against the DraCor schema
+./validate tei/lessing-emilia.xml    # validate a single file
+```
+
+Common options: `--schema tei|dracor`, `--version <x.y.z>`, `--warn-only`,
+`--tag <docker-tag>`, `--no-pull`, `--pattern '<glob>'`. Run `./validate --help`
+for the full list.
+
+### Using `docker run` directly
+
+You need to mount your local TEI files to the `/tei` directory in the Docker
+container and adjust the `files` input accordingly. For the following examples
+we assume you are running the Docker commands from the directory containing a
+directory `tei`.
 
 ```sh
 docker pull dracor/validate-action:3

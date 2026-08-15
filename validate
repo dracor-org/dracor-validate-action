@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IMAGE=dracor/validate-action
+DEFAULT_TAG=3
+
+usage() {
+  cat <<'EOF'
+Usage: ./validate [options] <path>
+
+Validate one or more TEI XML files against the Relax NG (and Schematron,
+for the DraCor schema) shipped with the dracor/validate-action Docker image.
+
+Arguments:
+  <path>                      Directory of XML files, or a single XML file.
+
+Options:
+  -s, --schema <tei|dracor>   Schema to validate against (default: tei).
+  -V, --version <x.y.z>       Schema version (default: image default).
+  -w, --warn-only             Do not exit non-zero on validation errors.
+  -t, --tag <docker-tag>      Image tag (default: 3, or $DRACOR_VALIDATE_TAG).
+      --no-pull               Skip `docker pull` before running.
+      --pattern <glob>        File glob for directory mode (default: *.xml).
+  -h, --help                  Show this help and exit.
+
+Examples:
+  ./validate tei
+  ./validate --schema dracor tei
+  ./validate tei/lessing-emilia-galotti.xml
+  ./validate --pattern 'lessing-*.xml' tei
+EOF
+}
+
+die() {
+  echo "validate: $*" >&2
+  exit 2
+}
+
+schema=""
+version=""
+warn_only=0
+tag="${DRACOR_VALIDATE_TAG:-$DEFAULT_TAG}"
+pull=1
+pattern=""
+positional=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -s|--schema)
+      [[ $# -ge 2 ]] || die "$1 requires an argument"
+      schema="$2"; shift 2 ;;
+    -V|--version)
+      [[ $# -ge 2 ]] || die "$1 requires an argument"
+      version="$2"; shift 2 ;;
+    -w|--warn-only)
+      warn_only=1; shift ;;
+    -t|--tag)
+      [[ $# -ge 2 ]] || die "$1 requires an argument"
+      tag="$2"; shift 2 ;;
+    --no-pull)
+      pull=0; shift ;;
+    --pattern)
+      [[ $# -ge 2 ]] || die "$1 requires an argument"
+      pattern="$2"; shift 2 ;;
+    -h|--help)
+      usage; exit 0 ;;
+    --)
+      shift
+      while [[ $# -gt 0 ]]; do positional+=("$1"); shift; done ;;
+    -*)
+      die "unknown option: $1" ;;
+    *)
+      positional+=("$1"); shift ;;
+  esac
+done
+
+[[ ${#positional[@]} -eq 1 ]] || { usage >&2; die "expected exactly one <path> argument"; }
+target="${positional[0]}"
+[[ -e "$target" ]] || die "path not found: $target"
+
+if [[ -d "$target" ]]; then
+  mount_host="$(cd "$target" && pwd)"
+  input_files="/tei/${pattern:-*.xml}"
+elif [[ -f "$target" ]]; then
+  [[ -z "$pattern" ]] || die "--pattern is only valid when <path> is a directory"
+  mount_host="$(cd "$(dirname "$target")" && pwd)"
+  input_files="/tei/$(basename "$target")"
+else
+  die "path is neither a file nor a directory: $target"
+fi
+
+command -v docker >/dev/null 2>&1 || die "docker not found in PATH"
+
+if [[ $pull -eq 1 ]]; then
+  docker pull "$IMAGE:$tag"
+fi
+
+args=(run --rm -v "$mount_host:/tei" -e "INPUT_FILES=$input_files")
+[[ -n "$schema" ]]  && args+=(-e "INPUT_SCHEMA=$schema")
+[[ -n "$version" ]] && args+=(-e "INPUT_VERSION=$version")
+[[ $warn_only -eq 1 ]] && args+=(-e "INPUT_WARN-ONLY=true")
+args+=("$IMAGE:$tag")
+
+exec docker "${args[@]}"
