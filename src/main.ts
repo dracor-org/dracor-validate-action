@@ -1,7 +1,6 @@
 import * as core from '@actions/core';
 import { exec, ExecOptions } from '@actions/exec';
 import { dirname, join } from 'path';
-import { SummaryTableRow } from '@actions/core/lib/summary.js';
 import {
   getParams,
   makeLink,
@@ -18,6 +17,14 @@ interface ValidationError {
   lineNumber: number;
   columnNumber: number;
 }
+
+// Structural copy of @actions/core's SummaryTableRow. That type lives in
+// @actions/core/lib/summary.js which is walled off by the package's
+// `exports` field starting in v3, so we can't import it directly.
+type SummaryTableCell =
+  | string
+  | { data: string; header?: boolean; colspan?: string; rowspan?: string };
+type SummaryTableRow = SummaryTableCell[];
 
 const ERRLIMIT = 1000;
 
