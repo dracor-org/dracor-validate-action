@@ -9,6 +9,7 @@ import {
   truncateJingMessage,
 } from './utils.js';
 import { validate } from './schematron.js';
+import { formatTextSummary } from './textSummary.js';
 
 interface ValidationError {
   message: string;
@@ -80,6 +81,7 @@ export async function run(): Promise<void> {
 
     let jingOutput = '';
     const issues: ValidationError[] = [];
+    const stats: string[] = [];
 
     const options: ExecOptions = {
       listeners: {
@@ -156,10 +158,10 @@ export async function run(): Promise<void> {
         (e) => e.type === 'error' || e.type === 'fatal'
       ).length;
       numWarnings = issues.filter((e) => e.type === 'warning').length;
-      const stats = [
+      stats.push(
         `Total files validated: ${filePaths.length}`,
-        `Files with issues: ${uniqueFiles.length}`,
-      ];
+        `Files with issues: ${uniqueFiles.length}`
+      );
       if (issues.length > 0) {
         stats.push(
           `Total number of issues: ${issues.length}`,
@@ -184,12 +186,16 @@ export async function run(): Promise<void> {
     }
 
     try {
-      // if $GITHUB_STEP_SUMMARY is set we try to write otherwise we dump the
-      // summary to the console
+      // If we're running inside a GitHub workflow, write the HTML summary to
+      // $GITHUB_STEP_SUMMARY so it renders in the Actions UI. Otherwise
+      // (local `docker run` / `./validate`) print a plain-text rendering to
+      // stdout — the HTML summary is only noise on a terminal.
       if (process.env.GITHUB_STEP_SUMMARY) {
         core.summary.write();
+      } else if (filePaths.length) {
+        console.log(formatTextSummary(schemaTitle, stats, issues));
       } else {
-        console.log(core.summary.stringify());
+        console.log(`No files found. ('${files}')`);
       }
     } catch (error) {
       console.log(error);
