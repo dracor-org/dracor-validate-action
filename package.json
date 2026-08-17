@@ -37,7 +37,8 @@
     "package": "rolldown -c rolldown.config.ts",
     "package:watch": "pnpm run package -- --watch",
     "test": "vitest run",
-    "all": "pnpm run format:write && pnpm run lint && pnpm run ci-test && pnpm run coverage && pnpm run package"
+    "typecheck": "tsc --noEmit",
+    "all": "pnpm run format:write && pnpm run lint && pnpm run typecheck && pnpm run ci-test && pnpm run coverage && pnpm run package"
   },
   "dependencies": {
     "@actions/core": "^3.0.1",
