@@ -31,25 +31,30 @@ against upstream.
 ## Architecture
 
 This is a **Docker-based GitHub Action**, not a JavaScript action, because it
-needs the `jing` (Relax NG) and Java-based `schxslt-cli.jar` (Schematron) tools
+needs the `jing` (Relax NG) and Saxon-HE (Schematron via schxslt2) tools
 installed in the runner. Flow:
 
 1. [action.yml](action.yml) declares `runs.using: docker` pointing at
-   [Dockerfile](Dockerfile). The Dockerfile is multi-stage: stage 1 uses
-   `pnpm run package` to bundle `src/` into `dist/index.js`; stage 2 is the
-   runtime image on `node:26-slim` with `jing` and `schxslt-cli.jar` installed.
-   ENTRYPOINT is `node /usr/src/app/dist/index.js`.
+   [Dockerfile](Dockerfile). The Dockerfile is three-stage:
+   1. **build** — `pnpm run package` bundles `src/` into `dist/index.js`.
+   2. **schemas** — downloads Saxon-HE, xmlresolver, and the schxslt2
+      transpiler; runs the transpiler over every `schemas/dracor_*.sch` to
+      produce a precompiled validator XSLT (`schemas/dracor_*.xsl`).
+   3. **runtime** — `node:26-slim` with `jing` (which transitively pulls in a
+      JRE) plus the Saxon jars + precompiled `.xsl` files. ENTRYPOINT is
+      `node /usr/src/app/dist/index.js`.
 2. [src/index.ts](src/index.ts) → [src/main.ts](src/main.ts) reads inputs via
    `@actions/core`, resolves file paths (glob or space-separated) via
    [src/utils.ts](src/utils.ts), and picks the schema files from the bundled
    [schemas/](schemas/) directory.
 3. Relax NG validation shells out to `jing` and parses its stdout
    (`file:line:col: type: message`).
-4. For the `dracor` schema, [src/schematron.ts](src/schematron.ts) additionally
-   runs `schxslt-cli.jar` per file, parses the SVRL report with
-   `@xmldom/xmldom` + `xpath`, and resolves line/column numbers by re-parsing
-   the source XML with a locator-enabled DOM parser (SVRL only gives XPath
-   locations).
+4. For the `dracor` schema, [src/schematron.ts](src/schematron.ts) invokes
+   Saxon-HE against the precompiled `dracor_<version>.xsl` per file, parses the
+   SVRL report with `@xmldom/xmldom` + `xpath`, and resolves line/column numbers
+   by re-parsing the source XML with a locator-enabled DOM parser (SVRL only
+   gives XPath locations). No Schematron compilation happens at runtime — it all
+   happens in the `schemas` build stage.
 5. Results are aggregated into a GitHub Actions job summary table
    (`core.summary`). Exit non-zero on errors unless `warn-only` is set.
 

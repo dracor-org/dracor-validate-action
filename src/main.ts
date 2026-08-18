@@ -56,14 +56,16 @@ export async function run(): Promise<void> {
     const schemaDir = join(dirname(import.meta.dirname), 'schemas');
     core.debug(`schemaDir '${schemaDir}'`);
 
-    let schemaTitle, rngFileName, schematronFileName;
+    let schemaTitle, rngFileName, schematronXslFileName;
     if (schema === 'tei') {
       schemaTitle = `TEI-All ${version}`;
       rngFileName = `tei_all_${version}.rng`;
     } else if (schema === 'dracor') {
       schemaTitle = `DraCor Schema ${version}`;
       rngFileName = `dracor_${version}.rng`;
-      schematronFileName = `dracor_${version}.sch`;
+      // Precompiled at Docker build time from `dracor_${version}.sch` using
+      // the schxslt2 transpiler.
+      schematronXslFileName = `dracor_${version}.xsl`;
     } else {
       throw new Error(`Unknown schema "${schema}"`);
     }
@@ -72,7 +74,7 @@ export async function run(): Promise<void> {
     core.debug(`schemaTitle '${schemaTitle}'`);
     core.debug(`rngFileName '${rngFileName}'`);
     core.debug(`rngFile '${rngFile}'`);
-    core.debug(`schematronFileName '${schematronFileName}'`);
+    core.debug(`schematronXslFileName '${schematronXslFileName}'`);
 
     core.summary.addHeading(`Validation against ${schemaTitle}`, '2');
 
@@ -119,11 +121,11 @@ export async function run(): Promise<void> {
         }
       });
 
-      if (schematronFileName) {
-        const schematronFile = join(schemaDir, schematronFileName);
-        const jar = '/usr/src/app/schxslt-cli.jar';
+      if (schematronXslFileName) {
+        const validatorXsl = join(schemaDir, schematronXslFileName);
+        const classpath = '/usr/src/app/saxon.jar:/usr/src/app/xmlresolver.jar';
         for (const f of filePaths) {
-          const asserts = await validate(f, schematronFile, jar);
+          const asserts = await validate(f, validatorXsl, classpath);
           asserts.forEach(
             ({ document, role, text, lineNumber = 0, columnNumber = 0 }) => {
               // for now we skip informational messages
