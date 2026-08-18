@@ -84,7 +84,10 @@ function getDoc(path: string) {
     return teiDocs[path];
   }
   const xml = readFileSync(path, 'utf8');
-  const doc = new DOMParser({ locator: {} }).parseFromString(xml);
+  const doc = new DOMParser({ locator: true }).parseFromString(
+    xml,
+    'text/xml'
+  ) as unknown as Document;
   teiDocs[path] = doc;
   return doc;
 }
@@ -98,14 +101,12 @@ function getDoc(path: string) {
 export function parseSVRL(file: string): SchematronAssert[] {
   const reportXML = readFileSync(file, 'utf8');
   const reportDoc = new DOMParser({
-    errorHandler: {
-      warning: function () {},
-      error: function () {},
-      fatalError: function (e) {
-        console.error(e);
-      },
+    onError: (level, message) => {
+      if (level === 'fatalError') {
+        console.error(message);
+      }
     },
-  }).parseFromString(reportXML);
+  }).parseFromString(reportXML, 'text/xml') as unknown as Node;
 
   const select = xpath.useNamespaces({
     svrl: 'http://purl.oclc.org/dsdl/svrl',
