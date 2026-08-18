@@ -25,8 +25,8 @@ against upstream.
 - `pnpm run format:write` / `format:check` — Prettier
 - `pnpm run package` — Rolldown-bundle `src/index.ts` → `dist/index.js`
 - `pnpm run bundle` — format + package (run before committing)
-- `pnpm run all` — full pre-commit workflow: format, lint, test with coverage,
-  coverage badge, package
+- `pnpm run all` — full pre-commit workflow: format, lint, typecheck, test with
+  coverage, package
 
 ## Architecture
 

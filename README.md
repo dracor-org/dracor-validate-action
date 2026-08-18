@@ -1,10 +1,5 @@
 # DraCor Validate Action
 
-<!-- [![GitHub Super-Linter](https://github.com/cmil/dracor-validate-action/actions/workflows/linter.yml/badge.svg)](https://github.com/super-linter/super-linter)
-![Check `dist/`](https://github.com/cmil/dracor-validate-action/actions/workflows/check-dist.yml/badge.svg)
-![CI](https://github.com/cmil/dracor-validate-action/actions/workflows/ci.yml/badge.svg)
-[![Code Coverage](./badges/coverage.svg)](./badges/coverage.svg) -->
-
 This GitHub Action validates XML files against different schemas and presents
 the validation output in the action summary. Currently
 [TEI-All](https://github.com/TEIC/TEI) and the

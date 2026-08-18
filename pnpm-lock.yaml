@@ -65,9 +65,6 @@ importers:
       globals:
         specifier: ^17.11.0
         version: 17.11.0
-      make-coverage-badge:
-        specifier: ^1.2.0
-        version: 1.2.0
       prettier:
         specifier: ^3.9.5
         version: 3.9.6
@@ -2562,14 +2559,6 @@ packages:
         integrity: sha512-llBEhWm1SacoRwgHUoQJYtwp4PBLF4faQi5TCpIGyGs9n4y5+juI0tDgyKIfpqxckRHaHzouUEph3THklWh03w==,
       }
 
-  make-coverage-badge@1.2.0:
-    resolution:
-      {
-        integrity: sha512-nA1eQZJ9vcY2UoQLVIdzqyRoNtAZHWlXJfrHkaMB/pQgTYBPmbImkykfxWeAtUQuLJXzb6eAhbR7nEgrt+S7FA==,
-      }
-    engines: { node: ">=6.11", npm: ">=5.3" }
-    hasBin: true
-
   make-dir@4.0.0:
     resolution:
       {
@@ -2623,13 +2612,6 @@ packages:
       {
         integrity: sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==,
       }
-
-  mri@1.1.4:
-    resolution:
-      {
-        integrity: sha512-6y7IjGPm8AzlvoUrwAaw1tLnUBudaS3752vcd8JtrpGGQn+rXIe63LFVHm/YMwtqAuh+LJPCFdlLYPWM1nYn6w==,
-      }
-    engines: { node: ">=4" }
 
   ms@2.1.3:
     resolution:
@@ -5122,10 +5104,6 @@ snapshots:
       "@babel/types": 7.29.8
       source-map-js: 1.2.1
 
-  make-coverage-badge@1.2.0:
-    dependencies:
-      mri: 1.1.4
-
   make-dir@4.0.0:
     dependencies:
       semver: 7.8.5
@@ -5152,8 +5130,6 @@ snapshots:
       brace-expansion: 2.1.4
 
   minimist@1.2.8: {}
-
-  mri@1.1.4: {}
 
   ms@2.1.3: {}
 

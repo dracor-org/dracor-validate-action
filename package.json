@@ -30,7 +30,6 @@
   "scripts": {
     "bundle": "pnpm run format:write && pnpm run package",
     "ci-test": "vitest run --coverage",
-    "coverage": "make-coverage-badge --output-path ./badges/coverage.svg",
     "format:write": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
@@ -38,7 +37,7 @@
     "package:watch": "pnpm run package -- --watch",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "all": "pnpm run format:write && pnpm run lint && pnpm run typecheck && pnpm run ci-test && pnpm run coverage && pnpm run package"
+    "all": "pnpm run format:write && pnpm run lint && pnpm run typecheck && pnpm run ci-test && pnpm run package"
   },
   "dependencies": {
     "@actions/core": "^3.0.1",
@@ -62,7 +61,6 @@
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-prettier": "^5.5.6",
     "globals": "^17.11.0",
-    "make-coverage-badge": "^1.2.0",
     "prettier": "^3.9.5",
     "prettier-eslint": "^16.4.2",
     "rolldown": "^1.2.4",
