@@ -1,6 +1,6 @@
 import { relative } from 'path';
 import * as core from '@actions/core';
-import glob from '@actions/glob';
+import * as glob from '@actions/glob';
 import { DRACOR_VERSION, TEI_VERSION } from './config.js';
 
 export interface Params {
