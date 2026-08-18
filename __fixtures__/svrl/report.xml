@@ -1,13 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svrl:schematron-output xmlns:svrl="http://purl.oclc.org/dsdl/svrl"
                        xmlns:tei="http://www.tei-c.org/ns/1.0">
-  <svrl:active-pattern name="dracor-checks" documents="file:{{DOCUMENT_PATH}}"/>
-  <svrl:fired-rule context="tei:teiHeader" role="warning"/>
-  <svrl:failed-assert location="/Q{http://www.tei-c.org/ns/1.0}TEI/Q{http://www.tei-c.org/ns/1.0}teiHeader">
+  <svrl:active-pattern id="schematron-constraint-dracor-checks-1"/>
+  <svrl:fired-rule role="warning"
+                   context="tei:teiHeader"
+                   document="file:{{DOCUMENT_PATH}}"/>
+  <svrl:failed-assert patternId="schematron-constraint-dracor-checks-1"
+                      location="/Q{http://www.tei-c.org/ns/1.0}TEI/Q{http://www.tei-c.org/ns/1.0}teiHeader"
+                      test="@xml:id">
     <svrl:text>Attribute @xml:id missing on element &lt;teiHeader&gt;.</svrl:text>
   </svrl:failed-assert>
-  <svrl:fired-rule context="tei:title"/>
-  <svrl:successful-report location="/Q{http://www.tei-c.org/ns/1.0}TEI/Q{http://www.tei-c.org/ns/1.0}teiHeader/Q{http://www.tei-c.org/ns/1.0}fileDesc/Q{http://www.tei-c.org/ns/1.0}titleStmt/Q{http://www.tei-c.org/ns/1.0}title">
+  <svrl:fired-rule context="tei:title"
+                   document="file:{{DOCUMENT_PATH}}"/>
+  <svrl:successful-report patternId="schematron-constraint-dracor-checks-1"
+                          location="/Q{http://www.tei-c.org/ns/1.0}TEI/Q{http://www.tei-c.org/ns/1.0}teiHeader/Q{http://www.tei-c.org/ns/1.0}fileDesc/Q{http://www.tei-c.org/ns/1.0}titleStmt/Q{http://www.tei-c.org/ns/1.0}title"
+                          test="true()">
     <svrl:text>Second issue on same document exercises the doc cache.</svrl:text>
   </svrl:successful-report>
 </svrl:schematron-output>

@@ -61,22 +61,24 @@ describe('schematron.ts', () => {
   });
 
   describe('runSchxslt', () => {
-    it('invokes java with expected arguments and returns a report path', async () => {
+    it('invokes Saxon on a precompiled validator XSLT and returns a report path', async () => {
       exec.exec.mockImplementation(async () => 0);
-      const reportFile = await runSchxslt('in.xml', 'schema.sch', 'my-jar.jar');
+      const reportFile = await runSchxslt(
+        'in.xml',
+        'validator.xsl',
+        'saxon.jar:xmlresolver.jar'
+      );
 
       expect(exec.exec).toHaveBeenCalledTimes(1);
       const [cmd, args] = exec.exec.mock.calls[0];
       expect(cmd).toBe('java');
       expect(args).toEqual([
-        '-jar',
-        'my-jar.jar',
-        '-d',
-        'in.xml',
-        '-s',
-        'schema.sch',
-        '-o',
-        reportFile,
+        '-cp',
+        'saxon.jar:xmlresolver.jar',
+        'net.sf.saxon.Transform',
+        '-s:in.xml',
+        '-xsl:validator.xsl',
+        `-o:${reportFile}`,
       ]);
       expect(reportFile).toMatch(/svrl\.xml$/);
     });
@@ -85,16 +87,16 @@ describe('schematron.ts', () => {
       exec.exec.mockImplementation(async () => {
         throw new Error('boom');
       });
-      const reportFile = await runSchxslt('in.xml', 'schema.sch');
+      const reportFile = await runSchxslt('in.xml', 'validator.xsl');
       expect(reportFile).toMatch(/svrl\.xml$/);
     });
   });
 
   describe('validate', () => {
-    it('runs schxslt and returns parsed asserts', async () => {
+    it('runs Saxon on the compiled validator and returns parsed asserts', async () => {
       exec.exec.mockImplementation(async (_cmd, args) => {
-        const outIdx = (args as string[]).indexOf('-o');
-        const outFile = (args as string[])[outIdx + 1];
+        const outArg = (args as string[]).find((a) => a.startsWith('-o:'));
+        const outFile = outArg!.slice(3);
         writeFileSync(
           outFile,
           svrlTemplate.replaceAll('{{DOCUMENT_PATH}}', samplePath)
@@ -102,7 +104,7 @@ describe('schematron.ts', () => {
         return 0;
       });
 
-      const results = await validate('in.xml', 'schema.sch', 'jar.jar');
+      const results = await validate('in.xml', 'validator.xsl', 'saxon.jar');
       expect(results).toHaveLength(2);
       expect(results[0].fileName).toBe('sample.xml');
     });
