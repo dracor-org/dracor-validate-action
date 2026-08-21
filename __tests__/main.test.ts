@@ -109,7 +109,7 @@ describe('main.ts', () => {
     }
   });
 
-  it('adds schematron warnings and errors to the summary table, skipping information', async () => {
+  it('adds schematron warnings and errors to separate summary tables, skipping information', async () => {
     validate.mockResolvedValue([
       {
         document: 'tei/valid.xml',
@@ -134,11 +134,41 @@ describe('main.ts', () => {
       },
     ]);
     await run();
-    expect(core.summary.addTable).toHaveBeenCalled();
-    const table = core.summary.addTable.mock.calls[0][0];
-    // header row + warning + error rows (info skipped)
-    expect(table).toHaveLength(3);
+    // Two tables: errors first, warnings second (info skipped).
+    expect(core.summary.addTable).toHaveBeenCalledTimes(2);
+    const errorTable = core.summary.addTable.mock.calls[0][0];
+    const warningTable = core.summary.addTable.mock.calls[1][0];
+    // header + 1 error row
+    expect(errorTable).toHaveLength(2);
+    // header + 1 warning row
+    expect(warningTable).toHaveLength(2);
+    // Headings emitted for each section.
+    const headings = core.summary.addHeading.mock.calls.map(
+      (c: unknown[]) => c[0]
+    );
+    expect(headings).toContain('Errors');
+    expect(headings).toContain('Warnings');
     // errors present, so action fails
     expect(core.setFailed).toHaveBeenCalledWith('Invalid documents');
+  });
+
+  it('truncates the summary and adds a note when total issues exceed the limit', async () => {
+    // 1001 error rows via schematron > ERRLIMIT (1000)
+    const asserts = Array.from({ length: 1001 }, (_, i) => ({
+      document: 'tei/valid.xml',
+      role: '',
+      text: `err ${i}`,
+      lineNumber: i + 1,
+      columnNumber: 1,
+    }));
+    validate.mockResolvedValue(asserts);
+    await run();
+    const errorTable = core.summary.addTable.mock.calls[0][0];
+    // header + 1000 rows (capped)
+    expect(errorTable).toHaveLength(1001);
+    const rawCalls = core.summary.addRaw.mock.calls.map(
+      (c: unknown[]) => c[0] as string
+    );
+    expect(rawCalls.some((s: string) => /truncated/i.test(s))).toBe(true);
   });
 });

@@ -102,6 +102,7 @@ export async function run(): Promise<void> {
       }
 
       const errorRows: SummaryTableRow[] = [];
+      const warningRows: SummaryTableRow[] = [];
 
       jingOutput.split('\n').forEach((line) => {
         const m = line.match(/^([^:]+):([0-9]+):([0-9]+): ([^:]+): (.+)$/);
@@ -112,12 +113,16 @@ export async function run(): Promise<void> {
           const type = m[4];
           const message = m[5];
           issues.push({ file, lineNumber, columnNumber, type, message });
-          errorRows.push([
+          const row: SummaryTableRow = [
             makeLink(file, lineNumber),
             `${lineNumber}:${columnNumber}`,
-            type === 'error' || type === 'fatal' ? '❌' : '⚠️',
             truncateJingMessage(message),
-          ]);
+          ];
+          if (type === 'error' || type === 'fatal') {
+            errorRows.push(row);
+          } else {
+            warningRows.push(row);
+          }
         }
       });
 
@@ -138,12 +143,16 @@ export async function run(): Promise<void> {
                   lineNumber,
                   columnNumber,
                 });
-                errorRows.push([
+                const row: SummaryTableRow = [
                   makeLink(file, lineNumber),
                   `${lineNumber}:${columnNumber}`,
-                  role === 'warning' ? '⚠️' : '❌',
                   `<small>${text}</small>`,
-                ]);
+                ];
+                if (role === 'warning') {
+                  warningRows.push(row);
+                } else {
+                  errorRows.push(row);
+                }
               }
             }
           );
@@ -173,14 +182,34 @@ export async function run(): Promise<void> {
         );
       }
       core.summary.addList(stats);
-      if (errorRows.length) {
-        errorRows.unshift([
-          { data: 'File', header: true },
-          { data: 'Line:Col', header: true },
-          { data: 'Type', header: true },
-          { data: 'Message', header: true },
-        ]);
-        core.summary.addTable(errorRows.slice(0, ERRLIMIT));
+
+      const header: SummaryTableRow = [
+        { data: 'File', header: true },
+        { data: 'Line:Col', header: true },
+        { data: 'Message', header: true },
+      ];
+      // ERRLIMIT caps the total rows across both tables to keep the summary
+      // under GitHub's size limit; errors get priority.
+      const total = errorRows.length + warningRows.length;
+      const errorSlots = Math.min(errorRows.length, ERRLIMIT);
+      const warningSlots = Math.min(
+        warningRows.length,
+        Math.max(0, ERRLIMIT - errorSlots)
+      );
+
+      if (errorSlots > 0) {
+        core.summary.addHeading('Errors', '3');
+        core.summary.addTable([header, ...errorRows.slice(0, errorSlots)]);
+      }
+      if (warningSlots > 0) {
+        core.summary.addHeading('Warnings', '3');
+        core.summary.addTable([header, ...warningRows.slice(0, warningSlots)]);
+      }
+      if (total > ERRLIMIT) {
+        core.summary.addRaw(
+          `<em>Output truncated: showing ${ERRLIMIT} of ${total} issues.</em>`,
+          true
+        );
       }
     } else {
       core.debug(`No files found. ('${files}')`);

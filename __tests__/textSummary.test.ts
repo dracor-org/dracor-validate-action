@@ -20,10 +20,10 @@ describe('formatTextSummary', () => {
     );
   });
 
-  it('renders an aligned table when there are issues and strips HTML markup', () => {
+  it('renders separate Errors and Warnings tables, strips HTML markup', () => {
     const out = formatTextSummary(
       'DraCor Schema 1.6.0',
-      ['Total files validated: 1', 'Errors: 1'],
+      ['Total files validated: 1', 'Errors: 1', 'Warnings: 1'],
       [
         {
           file: 'valid.xml',
@@ -50,9 +50,17 @@ describe('formatTextSummary', () => {
     expect(lines[0]).toBe('DraCor Schema 1.6.0');
     expect(lines[1]).toBe('==='.repeat(19 / 3 + 1).slice(0, 19));
 
-    // Header row present with the four expected columns.
-    const header = lines.find((l) => l.startsWith('File'));
-    expect(header).toMatch(/^File\s+Line:Col\s+Type\s+Message$/);
+    // Both section headings emitted, Errors before Warnings.
+    const errorHeadingIdx = lines.indexOf('Errors');
+    const warningHeadingIdx = lines.indexOf('Warnings');
+    expect(errorHeadingIdx).toBeGreaterThan(-1);
+    expect(warningHeadingIdx).toBeGreaterThan(errorHeadingIdx);
+
+    // Header row present, no Type column.
+    const headerRows = lines.filter((l) =>
+      /^File\s+Line:Col\s+Message$/.test(l)
+    );
+    expect(headerRows).toHaveLength(2);
 
     // Both issue rows present, HTML stripped, entities decoded.
     expect(out).toContain(
@@ -63,18 +71,24 @@ describe('formatTextSummary', () => {
     expect(out).not.toContain('<small>');
     expect(out).not.toContain('&lt;');
 
-    // Line:Col column is aligned to the widest value ("Line:Col" = 8 chars).
-    // Both entries "19:7" and "20:9" are shorter, so they must be padded.
+    // Data rows: three-column layout without a type cell.
     const dataRows = lines.filter((l) => l.startsWith('valid.xml'));
     expect(dataRows).toHaveLength(2);
     for (const row of dataRows) {
-      // File column is padded to the width of "valid.xml" (9) — no extra pad needed here.
-      // Assert the separator between columns is exactly two spaces.
-      expect(row).toMatch(/^valid\.xml {2}\d+:\d+\s+(warning|error)\s+.+$/);
+      expect(row).toMatch(/^valid\.xml {2}\d+:\d+\s+.+$/);
     }
+
+    // Error row lands under the Errors heading, warning under Warnings.
+    const errorRowIdx = lines.findIndex((l) =>
+      l.includes('should use a <ref>')
+    );
+    const warningRowIdx = lines.findIndex((l) => l.includes('is <deprecated>'));
+    expect(errorRowIdx).toBeGreaterThan(errorHeadingIdx);
+    expect(errorRowIdx).toBeLessThan(warningHeadingIdx);
+    expect(warningRowIdx).toBeGreaterThan(warningHeadingIdx);
   });
 
-  it('falls back to "error" when the issue type is empty', () => {
+  it('treats an empty issue type as an error', () => {
     const out = formatTextSummary(
       'DraCor Schema 1.6.0',
       ['Errors: 1'],
@@ -88,6 +102,8 @@ describe('formatTextSummary', () => {
         },
       ]
     );
-    expect(out).toMatch(/a\.xml\s+1:1\s+error\s+boom/);
+    expect(out).toContain('Errors');
+    expect(out).not.toContain('Warnings');
+    expect(out).toMatch(/a\.xml\s+1:1\s+boom/);
   });
 });
