@@ -29,32 +29,41 @@ export function formatTextSummary(
     return lines.join('\n') + '\n';
   }
 
-  const header = ['File', 'Line:Col', 'Type', 'Message'];
-  const rows = issues.map((i) => [
+  const errors = issues.filter(
+    (i) => i.type === 'error' || i.type === 'fatal' || i.type === ''
+  );
+  const warnings = issues.filter((i) => i.type === 'warning');
+
+  const toRow = (i: TextSummaryIssue) => [
     i.file,
     `${i.lineNumber}:${i.columnNumber}`,
-    i.type || 'error',
     stripHtml(i.message),
-  ]);
+  ];
 
-  const widths = [0, 1, 2].map((c) =>
-    Math.max(header[c].length, ...rows.map((r) => r[c].length))
-  );
+  const renderTable = (heading: string, rows: string[][]) => {
+    const header = ['File', 'Line:Col', 'Message'];
+    const widths = [0, 1].map((c) =>
+      Math.max(header[c].length, ...rows.map((r) => r[c].length))
+    );
+    const pad = (s: string, w: number) => s + ' '.repeat(w - s.length);
+    const fmt = (row: string[]) =>
+      [pad(row[0], widths[0]), pad(row[1], widths[1]), row[2]].join('  ');
 
-  const pad = (s: string, w: number) => s + ' '.repeat(w - s.length);
-  const fmt = (row: string[]) =>
-    [
-      pad(row[0], widths[0]),
-      pad(row[1], widths[1]),
-      pad(row[2], widths[2]),
-      row[3],
-    ].join('  ');
+    lines.push('');
+    lines.push(heading);
+    lines.push('-'.repeat(heading.length));
+    lines.push(fmt(header));
+    lines.push(fmt(widths.map((w) => '-'.repeat(w)).concat('-'.repeat(20))));
+    for (const row of rows) {
+      lines.push(fmt(row));
+    }
+  };
 
-  lines.push('');
-  lines.push(fmt(header));
-  lines.push(fmt(widths.map((w) => '-'.repeat(w)).concat('-'.repeat(20))));
-  for (const row of rows) {
-    lines.push(fmt(row));
+  if (errors.length) {
+    renderTable('Errors', errors.map(toRow));
+  }
+  if (warnings.length) {
+    renderTable('Warnings', warnings.map(toRow));
   }
 
   return lines.join('\n') + '\n';
