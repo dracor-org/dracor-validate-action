@@ -177,8 +177,9 @@ a directory or single file for you:
 ```
 
 Common options: `--schema tei|dracor`, `--version <x.y.z>`, `--warn-only`,
-`--tag <docker-tag>`, `--no-pull`, `--pattern '<glob>'`. Run `./validate --help`
-for the full list.
+`--tag <docker-tag>`, `--no-pull`, `--pattern '<glob>'`, `--unique-ids [<glob>]`
+(root-`xml:id` uniqueness check across the mounted directory — useful when
+validating a single new file). Run `./validate --help` for the full list.
 
 ### Using `docker run` directly
 
