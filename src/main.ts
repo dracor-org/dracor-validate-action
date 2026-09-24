@@ -9,6 +9,7 @@ import {
   truncateJingMessage,
 } from './utils.js';
 import { validate } from './schematron.js';
+import { findRootIdCollisions } from './idcheck.js';
 import { formatTextSummary } from './textSummary.js';
 
 interface ValidationError {
@@ -46,10 +47,11 @@ export async function run(): Promise<void> {
       core.debug(`commit '${sha}'`);
     }
 
-    const { schema, version, files, warnOnly } = getParams();
+    const { schema, version, files, uniqueIds, warnOnly } = getParams();
     core.debug(`schema '${schema}'`);
     core.debug(`version '${version}'`);
     core.debug(`files '${files}'`);
+    core.debug(`unique-ids '${uniqueIds}'`);
     core.debug(`warn-only '${warnOnly ? 'yes' : 'no'}'`);
 
     // the schema directory is expected next to the one containing index.js
@@ -81,6 +83,9 @@ export async function run(): Promise<void> {
     const filePaths = await resolveFiles(files);
     console.log(filePaths);
 
+    const uniqueIdPaths = uniqueIds ? await resolveFiles(uniqueIds) : [];
+    const idScope = Array.from(new Set([...filePaths, ...uniqueIdPaths]));
+
     let jingOutput = '';
     const issues: ValidationError[] = [];
     const stats: string[] = [];
@@ -93,40 +98,42 @@ export async function run(): Promise<void> {
       },
     };
 
-    if (filePaths.length) {
-      try {
-        await exec('jing', [rngFile, ...filePaths], options);
-        core.debug('jing ran successfully');
-      } catch {
-        core.debug('jing exited with errors');
-      }
-
+    if (filePaths.length || idScope.length) {
       const errorRows: SummaryTableRow[] = [];
       const warningRows: SummaryTableRow[] = [];
 
-      jingOutput.split('\n').forEach((line) => {
-        const m = line.match(/^([^:]+):([0-9]+):([0-9]+): ([^:]+): (.+)$/);
-        if (m) {
-          const file = trimFilePath(m[1]);
-          const lineNumber = parseInt(m[2]);
-          const columnNumber = parseInt(m[3]);
-          const type = m[4];
-          const message = m[5];
-          issues.push({ file, lineNumber, columnNumber, type, message });
-          const row: SummaryTableRow = [
-            makeLink(file, lineNumber),
-            `${lineNumber}:${columnNumber}`,
-            truncateJingMessage(message),
-          ];
-          if (type === 'error' || type === 'fatal') {
-            errorRows.push(row);
-          } else {
-            warningRows.push(row);
-          }
+      if (filePaths.length) {
+        try {
+          await exec('jing', [rngFile, ...filePaths], options);
+          core.debug('jing ran successfully');
+        } catch {
+          core.debug('jing exited with errors');
         }
-      });
 
-      if (schematronXslFileName) {
+        jingOutput.split('\n').forEach((line) => {
+          const m = line.match(/^([^:]+):([0-9]+):([0-9]+): ([^:]+): (.+)$/);
+          if (m) {
+            const file = trimFilePath(m[1]);
+            const lineNumber = parseInt(m[2]);
+            const columnNumber = parseInt(m[3]);
+            const type = m[4];
+            const message = m[5];
+            issues.push({ file, lineNumber, columnNumber, type, message });
+            const row: SummaryTableRow = [
+              makeLink(file, lineNumber),
+              `${lineNumber}:${columnNumber}`,
+              truncateJingMessage(message),
+            ];
+            if (type === 'error' || type === 'fatal') {
+              errorRows.push(row);
+            } else {
+              warningRows.push(row);
+            }
+          }
+        });
+      }
+
+      if (schematronXslFileName && filePaths.length) {
         const validatorXsl = join(schemaDir, schematronXslFileName);
         const classpath = '/usr/src/app/saxon.jar:/usr/src/app/xmlresolver.jar';
         for (const f of filePaths) {
@@ -159,6 +166,22 @@ export async function run(): Promise<void> {
         }
       }
 
+      if (idScope.length > 1) {
+        const collisions = await findRootIdCollisions(idScope);
+        collisions.forEach(({ id, file, otherFiles }) => {
+          const others = otherFiles.map((f) => makeLink(f, 1)).join(', ');
+          const message = `Duplicate xml:id "${id}" also in ${others}`;
+          issues.push({
+            file,
+            message,
+            type: 'error',
+            lineNumber: 1,
+            columnNumber: 0,
+          });
+          errorRows.push([makeLink(file, 1), '', message]);
+        });
+      }
+
       const uniqueIssues = issues
         .map((e) => e.message)
         .filter((m, i, a) => a.indexOf(m) === i);
@@ -173,6 +196,9 @@ export async function run(): Promise<void> {
         `Total files validated: ${filePaths.length}`,
         `Files with issues: ${uniqueFiles.length}`
       );
+      if (uniqueIds) {
+        stats.push(`Files checked for xml:id uniqueness: ${idScope.length}`);
+      }
       if (issues.length > 0) {
         stats.push(
           `Total number of issues: ${issues.length}`,
@@ -223,7 +249,7 @@ export async function run(): Promise<void> {
       // stdout — the HTML summary is only noise on a terminal.
       if (process.env.GITHUB_STEP_SUMMARY) {
         core.summary.write();
-      } else if (filePaths.length) {
+      } else if (filePaths.length || idScope.length) {
         console.log(formatTextSummary(schemaTitle, stats, issues));
       } else {
         console.log(`No files found. ('${files}')`);
