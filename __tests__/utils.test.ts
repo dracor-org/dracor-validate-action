@@ -86,6 +86,7 @@ describe('utils.ts', () => {
         schema: 'tei',
         version: TEI_VERSION,
         files: '',
+        uniqueIds: '',
         warnOnly: false,
       });
     });
@@ -107,8 +108,16 @@ describe('utils.ts', () => {
         schema: 'dracor',
         version: '1.2.3',
         files: 'a.xml',
+        uniqueIds: '',
         warnOnly: true,
       });
+    });
+
+    it('reads unique-ids input', () => {
+      core.getInput.mockImplementation((name: string) =>
+        name === 'unique-ids' ? 'tei/*.xml' : ''
+      );
+      expect(getParams().uniqueIds).toBe('tei/*.xml');
     });
 
     it.each(['yes', 'YES', 'true', 'True'])(

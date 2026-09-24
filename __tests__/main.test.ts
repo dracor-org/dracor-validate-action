@@ -10,11 +10,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as core from '../__fixtures__/core.js';
 import * as exec from '../__fixtures__/exec.js';
 
-const validate = vi.fn(async () => [] as unknown[]);
+const validate = vi.fn<(...args: unknown[]) => Promise<unknown[]>>(
+  async () => []
+);
+const findRootIdCollisions = vi.fn<(...args: unknown[]) => Promise<unknown[]>>(
+  async () => []
+);
 
 vi.mock('@actions/core', () => core);
 vi.mock('@actions/exec', () => exec);
 vi.mock('../src/schematron.js', () => ({ validate }));
+vi.mock('../src/idcheck.js', () => ({ findRootIdCollisions }));
 
 const { run } = await import('../src/main.js');
 
@@ -43,6 +49,7 @@ describe('main.ts', () => {
     core.summary.stringify.mockImplementation(() => '<summary>');
     exec.exec.mockImplementation(mockJingExecSuccess);
     validate.mockResolvedValue([]);
+    findRootIdCollisions.mockResolvedValue([]);
     delete process.env.GITHUB_STEP_SUMMARY;
   });
 
@@ -150,6 +157,55 @@ describe('main.ts', () => {
     expect(headings).toContain('Warnings');
     // errors present, so action fails
     expect(core.setFailed).toHaveBeenCalledWith('Invalid documents');
+  });
+
+  it('does not run the id check when unique-ids is empty', async () => {
+    await run();
+    expect(findRootIdCollisions).not.toHaveBeenCalled();
+  });
+
+  it('runs the id check across the union of files and unique-ids', async () => {
+    setInputs({
+      schema: 'dracor',
+      files: 'tei/valid.xml',
+      'unique-ids': 'tei/*.xml',
+    });
+    await run();
+    expect(findRootIdCollisions).toHaveBeenCalledTimes(1);
+    const scope = findRootIdCollisions.mock.calls[0][0] as string[];
+    // Both fixture files should be in scope, deduped.
+    expect(scope).toContain('tei/valid.xml');
+    expect(scope).toContain('tei/invalid.xml');
+    expect(new Set(scope).size).toBe(scope.length);
+  });
+
+  it('reports id collisions as errors and fails the action', async () => {
+    setInputs({
+      schema: 'dracor',
+      files: 'tei/valid.xml',
+      'unique-ids': 'tei/*.xml',
+    });
+    findRootIdCollisions.mockResolvedValue([
+      {
+        id: 'tst000001',
+        file: 'tei/valid.xml',
+        otherFiles: ['tei/invalid.xml'],
+      },
+    ]);
+    await run();
+    const errorTable = core.summary.addTable.mock.calls[0][0];
+    // header + collision row
+    expect(errorTable).toHaveLength(2);
+    expect(errorTable[1][2]).toMatch(/Duplicate xml:id "tst000001"/);
+    expect(core.setFailed).toHaveBeenCalledWith('Invalid documents');
+  });
+
+  it('runs only the id check when files is empty but unique-ids is set', async () => {
+    setInputs({ schema: 'dracor', files: '', 'unique-ids': 'tei/*.xml' });
+    await run();
+    expect(exec.exec).not.toHaveBeenCalled();
+    expect(validate).not.toHaveBeenCalled();
+    expect(findRootIdCollisions).toHaveBeenCalledTimes(1);
   });
 
   it('truncates the summary and adds a note when total issues exceed the limit', async () => {

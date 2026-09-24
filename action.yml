@@ -19,6 +19,13 @@ inputs:
     description: "Exit gracefully when validation fails"
     required: false
     default: "false"
+  unique-ids:
+    description: >
+      Optional glob of TEI files whose root xml:id will be checked for
+      corpus-wide uniqueness. The scope is the union of `files` and
+      `unique-ids`; leave empty to disable the check.
+    required: false
+    default: ""
 
 outputs:
   errors:
@@ -31,3 +38,4 @@ runs:
     INPUT_SCHEMA: ${{ inputs.schema }}
     INPUT_VERSION: ${{ inputs.version }}
     INPUT_FILES: ${{ inputs.files }}
+    INPUT_UNIQUE_IDS: ${{ inputs.unique-ids }}

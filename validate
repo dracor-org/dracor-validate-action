@@ -21,6 +21,11 @@ Options:
   -t, --tag <docker-tag>      Image tag (default: 3, or $DRACOR_VALIDATE_TAG).
       --no-pull               Skip `docker pull` before running.
       --pattern <glob>        File glob for directory mode (default: *.xml).
+  -u, --unique-ids [<glob>]   Check root TEI/@xml:id uniqueness across the
+                              mounted directory. Defaults to the same glob
+                              as --pattern (or *.xml). Useful when <path>
+                              is a single file: the check still spans the
+                              whole directory.
   -h, --help                  Show this help and exit.
 
 Examples:
@@ -28,6 +33,7 @@ Examples:
   ./validate --schema dracor tei
   ./validate tei/lessing-emilia-galotti.xml
   ./validate --pattern 'lessing-*.xml' tei
+  ./validate --unique-ids tei/new-file.xml
 EOF
 }
 
@@ -42,6 +48,8 @@ warn_only=0
 tag="${DRACOR_VALIDATE_TAG:-$DEFAULT_TAG}"
 pull=1
 pattern=""
+unique_ids=""
+check_unique_ids=0
 positional=()
 
 while [[ $# -gt 0 ]]; do
@@ -62,6 +70,16 @@ while [[ $# -gt 0 ]]; do
     --pattern)
       [[ $# -ge 2 ]] || die "$1 requires an argument"
       pattern="$2"; shift 2 ;;
+    -u|--unique-ids)
+      check_unique_ids=1
+      # Accept an optional glob argument. Treat the next token as the glob
+      # only when it doesn't look like another flag and isn't the final
+      # positional <path>.
+      if [[ $# -ge 3 && "$2" != -* ]]; then
+        unique_ids="$2"; shift 2
+      else
+        shift
+      fi ;;
     -h|--help)
       usage; exit 0 ;;
     --)
@@ -99,6 +117,9 @@ args=(run --rm -v "$mount_host:/tei" -e "INPUT_FILES=$input_files")
 [[ -n "$schema" ]]  && args+=(-e "INPUT_SCHEMA=$schema")
 [[ -n "$version" ]] && args+=(-e "INPUT_VERSION=$version")
 [[ $warn_only -eq 1 ]] && args+=(-e "INPUT_WARN-ONLY=true")
+if [[ $check_unique_ids -eq 1 ]]; then
+  args+=(-e "INPUT_UNIQUE-IDS=/tei/${unique_ids:-${pattern:-*.xml}}")
+fi
 args+=("$IMAGE:$tag")
 
 exec docker "${args[@]}"

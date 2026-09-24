@@ -34,6 +34,15 @@ set this to `"yes"`. This can be useful if you want to run the validation for
 informational purposes only without possibly blocking pull requests from being
 merged. Default `"no"`.
 
+### `unique-ids`
+
+Optional glob defining a set of TEI files whose root `xml:id` will be checked
+for corpus-wide uniqueness. The scope of the check is the **union** of `files`
+and `unique-ids`, so in the typical "validate only changed files" workflow you
+can pass the full corpus glob here to catch a new file that collides with an
+existing one. Duplicates are reported as errors and fail the action unless
+`warn-only` is set. Leave empty (the default) to disable the check.
+
 ## Versioning
 
 Released versions ship as prebuilt Docker images on
@@ -143,8 +152,12 @@ jobs:
           files: |
             ${{ steps.changed-tei-files.outputs.all_changed_files }}
             ${{ steps.all-tei-files.outputs.files }}
+          unique-ids: tei/*.xml
           schema: dracor
 ```
+
+`unique-ids: tei/*.xml` scopes the root-`xml:id` uniqueness check to the whole
+corpus even on pull requests where `files` only lists the changed files.
 
 ## Validating locally
 
@@ -164,8 +177,9 @@ a directory or single file for you:
 ```
 
 Common options: `--schema tei|dracor`, `--version <x.y.z>`, `--warn-only`,
-`--tag <docker-tag>`, `--no-pull`, `--pattern '<glob>'`. Run `./validate --help`
-for the full list.
+`--tag <docker-tag>`, `--no-pull`, `--pattern '<glob>'`, `--unique-ids [<glob>]`
+(root-`xml:id` uniqueness check across the mounted directory — useful when
+validating a single new file). Run `./validate --help` for the full list.
 
 ### Using `docker run` directly
 

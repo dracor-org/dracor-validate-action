@@ -7,6 +7,7 @@ export interface Params {
   schema: string;
   version: string;
   files: string;
+  uniqueIds: string;
   warnOnly: boolean;
 }
 
@@ -36,8 +37,9 @@ export function getParams(): Params {
   const schema = core.getInput('schema') || 'tei';
   const version = core.getInput('version') || defaultVersion(schema);
   const files = core.getInput('files') || '';
+  const uniqueIds = core.getInput('unique-ids') || '';
   const warnOnly = /^(yes|true)$/i.test(core.getInput('warn-only'));
-  return { schema, version, files, warnOnly };
+  return { schema, version, files, uniqueIds, warnOnly };
 }
 
 export function makeUrl(filePath: string, line: number): string {
