@@ -33,7 +33,7 @@ outputs:
 
 runs:
   using: docker
-  image: Dockerfile
+  image: docker://dracor/validate-action:3.1.0
   env:
     INPUT_SCHEMA: ${{ inputs.schema }}
     INPUT_VERSION: ${{ inputs.version }}
