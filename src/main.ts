@@ -209,7 +209,8 @@ export async function run(): Promise<void> {
       }
       core.summary.addList(stats);
 
-      const header: SummaryTableRow = [
+      const buildHeader = (marker: string): SummaryTableRow => [
+        { data: marker, header: true },
         { data: 'File', header: true },
         { data: 'Line:Col', header: true },
         { data: 'Message', header: true },
@@ -224,12 +225,18 @@ export async function run(): Promise<void> {
       );
 
       if (errorSlots > 0) {
-        core.summary.addHeading('Errors', '3');
-        core.summary.addTable([header, ...errorRows.slice(0, errorSlots)]);
+        core.summary.addHeading('🔴 Errors', '3');
+        core.summary.addTable([
+          buildHeader('🔴'),
+          ...errorRows.slice(0, errorSlots).map((r) => ['🔴', ...r]),
+        ]);
       }
       if (warningSlots > 0) {
-        core.summary.addHeading('Warnings', '3');
-        core.summary.addTable([header, ...warningRows.slice(0, warningSlots)]);
+        core.summary.addHeading('🟡 Warnings', '3');
+        core.summary.addTable([
+          buildHeader('🟡'),
+          ...warningRows.slice(0, warningSlots).map((r) => ['🟡', ...r]),
+        ]);
       }
       if (total > ERRLIMIT) {
         core.summary.addRaw(

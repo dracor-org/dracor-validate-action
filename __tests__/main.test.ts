@@ -153,8 +153,8 @@ describe('main.ts', () => {
     const headings = core.summary.addHeading.mock.calls.map(
       (c: unknown[]) => c[0]
     );
-    expect(headings).toContain('Errors');
-    expect(headings).toContain('Warnings');
+    expect(headings).toContain('🔴 Errors');
+    expect(headings).toContain('🟡 Warnings');
     // errors present, so action fails
     expect(core.setFailed).toHaveBeenCalledWith('Invalid documents');
   });
@@ -196,7 +196,7 @@ describe('main.ts', () => {
     const errorTable = core.summary.addTable.mock.calls[0][0];
     // header + collision row
     expect(errorTable).toHaveLength(2);
-    expect(errorTable[1][2]).toMatch(/Duplicate xml:id "tst000001"/);
+    expect(errorTable[1][3]).toMatch(/Duplicate xml:id "tst000001"/);
     expect(core.setFailed).toHaveBeenCalledWith('Invalid documents');
   });
 
