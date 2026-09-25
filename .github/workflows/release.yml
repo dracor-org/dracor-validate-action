@@ -166,12 +166,26 @@ jobs:
           IS_PRERELEASE: ${{ steps.version.outputs.is_prerelease }}
         run: |
           PRERELEASE_FLAG=""
+          LIST_FLAGS=(--exclude-drafts --exclude-pre-releases)
           if [ "$IS_PRERELEASE" = "true" ]; then
             PRERELEASE_FLAG="--prerelease"
+            LIST_FLAGS=(--exclude-drafts)
           fi
+
+          # Each release lives on a detached commit off main, so GitHub's
+          # auto-detected "previous release" walks back to the newest tag
+          # reachable from the new commit and picks a much older version.
+          # Pin --notes-start-tag to the previous release explicitly.
+          PREV=$(gh release list "${LIST_FLAGS[@]}" \
+            --json tagName --jq '.[].tagName' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
+            | grep -v "^${VERSION}$" \
+            | sort -V | tail -1)
+
           # shellcheck disable=SC2086
           gh release create "$VERSION" \
             --target "$SHA" \
             --title "$VERSION" \
             --generate-notes \
+            ${PREV:+--notes-start-tag "$PREV"} \
             $PRERELEASE_FLAG
