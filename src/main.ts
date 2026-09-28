@@ -166,7 +166,7 @@ export async function run(): Promise<void> {
         }
       }
 
-      if (idScope.length > 1) {
+      if (uniqueIds && idScope.length > 1) {
         const collisions = await findRootIdCollisions(idScope);
         collisions.forEach(({ id, file, otherFiles }) => {
           const others = otherFiles.map((f) => makeLink(f, 1)).join(', ');

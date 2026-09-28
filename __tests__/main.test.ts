@@ -164,6 +164,12 @@ describe('main.ts', () => {
     expect(findRootIdCollisions).not.toHaveBeenCalled();
   });
 
+  it('does not run the id check when unique-ids is empty even with multiple files', async () => {
+    setInputs({ schema: 'dracor', files: 'tei/*.xml' });
+    await run();
+    expect(findRootIdCollisions).not.toHaveBeenCalled();
+  });
+
   it('runs the id check across the union of files and unique-ids', async () => {
     setInputs({
       schema: 'dracor',
