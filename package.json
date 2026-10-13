@@ -45,7 +45,7 @@
     "@actions/github": "^9.1.1",
     "@actions/glob": "^0.7.0",
     "@xmldom/xmldom": "^0.9.12",
-    "xpath": "^0.0.34"
+    "xpath": "^0.0.35"
   },
   "devDependencies": {
     "@eslint/compat": "^2.1.1",
